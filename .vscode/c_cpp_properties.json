@@ -16,7 +16,16 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "windows-msvc-x64"
-        }
+        },
+        {
+            "name": "OnDeck",
+            "includePath": ["${workspaceFolder}/**", "/home/deck/Workspaces/Libraries/Vulkan/x86_64/include"],
+            "defines": [],
+            "compilerPath": "/usr/lib/sdk/llvm14/bin/clang++",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "clang-x64"
+          }
     ],
     "version": 4
 }
