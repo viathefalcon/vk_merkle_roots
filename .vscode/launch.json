@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}\\bin\\vkmr.exe",
-            "args": [],
+            "args": ["abc", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}\\bin",
             "environment": [],

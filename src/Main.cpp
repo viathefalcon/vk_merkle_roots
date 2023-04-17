@@ -1,17 +1,29 @@
+// Main.cpp: defines the entry point for the application
+//
+
+// Includes
+//
+
+// C++ Standard Headers
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
 
+// Vulkan Headers
 #include <vulkan/vulkan.h>
 
-using namespace std;
+// Local Project Headers
+#include "Debug.h"
+#include "SHA-256.h"
 
 // Functions
 //
 
-// Entry-point
-int main() {
+// Vulkan (test) driver
+int vkTest() {
+    using namespace std;
+
     // Determine the amount of memory we want
     const uint32_t uValueCount = 256;
     const VkDeviceSize vkBufferSize = sizeof( uint32_t ) * uValueCount;
@@ -463,4 +475,20 @@ int main() {
 
     cerr << "Failed to initialise Vulkan" << endl;
     return 1;
+}
+
+// Gives the entry-point for the application
+int main(int argc, const char* argv[]) {
+
+    int result = vkTest( );
+    for (int i = 1; i < argc; ++i) {
+        using std::cout;
+
+        const auto arg = argv[i];
+        const auto hashed = cpu_sha256( arg );
+        const auto printed = print_bytes( hashed );
+        cout << arg << " >> " << printed.str( ) << std::endl;
+
+    }
+    return result;
 }

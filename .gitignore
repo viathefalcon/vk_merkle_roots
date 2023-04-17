@@ -34,3 +34,6 @@
 # Intermediate compilation files
 *.pdb
 *.ilk
+
+# Compiled Shaders
+*.spv
