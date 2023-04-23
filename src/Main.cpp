@@ -1,6 +1,13 @@
 // Main.cpp: defines the entry point for the application
 //
 
+// Macros
+//
+
+#if !defined (_MACOS_ARM64)
+#define VULKAN_SUPPORT
+#endif
+
 // Includes
 //
 
@@ -10,8 +17,10 @@
 #include <vector>
 #include <string>
 
+#if defined (VULKAN_SUPPORT)
 // Vulkan Headers
 #include <vulkan/vulkan.h>
+#endif
 
 // Local Project Headers
 #include "Debug.h"
@@ -20,6 +29,7 @@
 // Functions
 //
 
+#if defined (VULKAN_SUPPORT)
 // Vulkan (test) driver
 int vkTest() {
     using namespace std;
@@ -476,11 +486,16 @@ int vkTest() {
     cerr << "Failed to initialise Vulkan" << endl;
     return 1;
 }
+#endif
 
 // Gives the entry-point for the application
 int main(int argc, const char* argv[]) {
 
+#if defined (VULKAN_SUPPORT)
     int result = vkTest( );
+#else
+    int result = 0;
+#endif
     for (int i = 1; i < argc; ++i) {
         using std::cout;
 

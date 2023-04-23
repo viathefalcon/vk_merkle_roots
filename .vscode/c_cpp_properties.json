@@ -26,7 +26,20 @@
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "clang-x64"
+        },
+        {
+            "name": "Mx", // M1, M2, etc
+            "includePath": ["${workspaceFolder}/**"],
+            "defines": [
+                "_DEBUG",
+                "_MACOS_ARM64"
+            ],
+            "macFrameworkPath": [],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-arm64"
           }
-    ],
+        ],
     "version": 4
 }

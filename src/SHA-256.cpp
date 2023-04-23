@@ -29,8 +29,9 @@
 #define min(x,y) (((x) <= (y)) ? (x) : (y))
 #endif
 
-#ifndef __ENDIAN_LITTLE__
-#define __ENDIAN_LITTLE__ 1
+// Default to little-endianness?
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 1
 #endif
 
 #define SWOP_ENDS_U32(x) \
@@ -39,7 +40,7 @@
 	(((x) << 8) & 0x00FF0000) | \
 	(((x) << 24) & 0xFF000000)
 
-#ifdef __ENDIAN_LITTLE__ 
+#ifdef __LITTLE_ENDIAN__ 
 #define GET_U32_BE(x) SWOP_ENDS_U32(x)
 #else
 #define GET_U32_BE(x) (x)
@@ -55,7 +56,7 @@
 	(((x) << 40) & 0x00FF000000000000)	| \
 	(((x) << 56) & 0xFF00000000000000)
 
-#ifdef __ENDIAN_LITTLE__ 
+#ifdef __LITTLE_ENDIAN__ 
 #define GET_U64_BE(x) SWOP_ENDS_U64(x)
 #else
 #define GET_U64_BE(x) (x)
@@ -110,7 +111,7 @@ static const uint32_t c_constants[] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf,
 // Functions
 //
 
-static void append(uint32_t* M, uint32_t size, size_t bytes) {
+static void append_message_block(uint32_t* M, uint32_t size, size_t bytes) {
 
 	const auto bits = GET_U64_BE( static_cast<uint64_t>( bytes ) << 3 );
 
@@ -172,13 +173,13 @@ static std::vector<uint32_t> cpu_sha256_n(const std::string& s) {
 		const auto offset = (i * block_size);
 		if (offset >= size){
 			if (size == offset){
-#ifdef __ENDIAN_LITTLE__
+#ifdef __LITTLE_ENDIAN__
 				M[0] = 0x00000080;
 #else
 				M[0] = 0x80000000;
 #endif
 			}
-			append( M, words, size );
+			append_message_block( M, words, size );
 		}else{
 			const char* p = ptr + offset;
 			//debug_print( p, static_cast<unsigned>( min( block_size, size - offset ) ) );
@@ -234,7 +235,7 @@ static std::vector<uint32_t> cpu_sha256_n(const std::string& s) {
 					;
 				}
 				if (delta >= 8){
-					append( M, words, size );
+					append_message_block( M, words, size );
 				}
 			}
 		}
@@ -255,7 +256,7 @@ static std::vector<uint32_t> cpu_sha256_n(const std::string& s) {
 		for (auto t = 0; t < 64; ++t){
 			// Prep the message schedule
 			if (t < words){
-#ifdef __ENDIAN_LITTLE__
+#ifdef __LITTLE_ENDIAN__
 				W[t] = SWOP_ENDS_U32( M[t] );
 #else
 				W[t] = M[t];
@@ -305,12 +306,12 @@ static std::vector<uint32_t> cpu_sha256_1(const std::vector<uint32_t>& u) {
 	for (auto w = half; w < words; ++w){
 		(*m++) = 0U;
 	}
-#ifdef __ENDIAN_LITTLE__
+#ifdef __LITTLE_ENDIAN__
 	M[half] = 0x80000000;
 	M[words-1] = 256;
 #else
 	M[8] = 0x00000080;
-	append( M, words, 32 );
+	append_message_block( M, words, 32 );
 #endif
 	//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
 
@@ -452,12 +453,12 @@ static std::vector<uint32_t> cpu_sha256_2(const std::vector<uint32_t>& u1, const
 			break;
 		}
 		clear_message_block( M, words );
-#ifdef __ENDIAN_LITTLE__
+#ifdef __LITTLE_ENDIAN__
 		M[0] = 0x80000000;
 		M[words-1] = 512;
 #else
 		M[0] = 0x00000080;
-		append( M, words, 64 );
+		append_message_block( M, words, 64 );
 #endif
 		//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
 	}
@@ -469,7 +470,7 @@ static std::string hash_to_string(const std::vector<uint32_t>& v) {
 	std::string result;
 	for (auto it = v.cbegin( ), end = v.cend( ); it != end; ++it){
 		const auto v = *it;
-#ifdef __ENDIAN_LITTLE__
+#ifdef __LITTLE_ENDIAN__
 		const uint32_t u = SWOP_ENDS_U32( v );
 #else
 		const uint u = v;
