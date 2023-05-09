@@ -4,7 +4,7 @@
 // Macros
 //
 
-#if !defined (_MACOS_ARM64)
+#if !defined (_MACOS_64_)
 #define VULKAN_SUPPORT
 #endif
 
@@ -503,7 +503,6 @@ int main(int argc, const char* argv[]) {
         const auto hashed = cpu_sha256( arg );
         const auto printed = print_bytes( hashed );
         cout << arg << " >> " << printed.str( ) << std::endl;
-
     }
     return result;
 }

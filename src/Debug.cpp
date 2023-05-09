@@ -61,31 +61,6 @@ void debug_print_bits(const unsigned char* ptr, unsigned count){
 	OutputDebugStringStream( oss );
 }
 
-void debug_print_bits_and_bytes(const unsigned char* ptr, size_t size) {
-
-	std::ostringstream oss;
-	auto p = const_cast<unsigned char*>( ptr );
-	for (decltype( size ) v = 0; v < size; ){
-		const auto bits = print_bits_to_oss( p, 1 );
-		oss << bits.str( );
-		oss << " (";
-		oss << std::hex << std::setw( 2 ) << std::setfill( '0' ) << static_cast<int>( *(p++) ) << std::dec;
-		oss << ") ";
-		if ((++v % sizeof( uint32_t )) == 0){
-			oss << std::endl;
-		}
-	}
-	oss << std::endl;
-	OutputDebugStringStream( oss );
-}
-
-void debug_print_bits_and_bytes(const std::string& s) {
-	debug_print_bits_and_bytes(
-		reinterpret_cast<const unsigned char*>( s.data( ) ),
-		s.size( )
-	);
-}
-
 void debug_print_bytes(const std::string& s) {
 
 	auto oss = print_bytes( s );

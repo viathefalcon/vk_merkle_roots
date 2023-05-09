@@ -239,7 +239,7 @@ static std::vector<uint32_t> cpu_sha256_n(const std::string& s) {
 				}
 			}
 		}
-		//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
+		debug_print_bits_and_bytes( M, words );
 
 		// Initialise the working variables
 		uint32_t a = H[0];
@@ -313,7 +313,7 @@ static std::vector<uint32_t> cpu_sha256_1(const std::vector<uint32_t>& u) {
 	M[8] = 0x00000080;
 	append_message_block( M, words, 32 );
 #endif
-	//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
+	//debug_print_bits_and_bytes( M, words );
 
 	// Set the initial hash value(s)
 	uint32_t H[] = {
@@ -391,7 +391,7 @@ static std::vector<uint32_t> cpu_sha256_2(const std::vector<uint32_t>& u1, const
 		u2.data( ),
 		sizeof( std::vector<uint32_t>::value_type ) * min( u2.size( ), words - count )
 	);
-	//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
+	//debug_print_bits_and_bytes( M, words );
 
 	// Set the initial hash value(s)
 	uint32_t H[] = {
@@ -460,7 +460,7 @@ static std::vector<uint32_t> cpu_sha256_2(const std::vector<uint32_t>& u1, const
 		M[0] = 0x00000080;
 		append_message_block( M, words, 64 );
 #endif
-		//debug_print_bits_and_bytes( reinterpret_cast<unsigned char *>( M ), sizeof( M ) );
+		//debug_print_bits_and_bytes( M, words );
 	}
 	return std::vector<uint32_t>( H, H + 8 );
 }

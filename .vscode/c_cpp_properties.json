@@ -28,11 +28,11 @@
             "intelliSenseMode": "clang-x64"
         },
         {
-            "name": "Mx", // M1, M2, etc
+            "name": "macOS",
             "includePath": ["${workspaceFolder}/**"],
             "defines": [
                 "_DEBUG",
-                "_MACOS_ARM64"
+                "_MACOS_64_"
             ],
             "macFrameworkPath": [],
             "compilerPath": "/usr/bin/clang",

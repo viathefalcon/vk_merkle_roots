@@ -105,7 +105,7 @@
             "args": [
                 "-std=c++11",
                 "src/*.cpp",
-                "-D_MACOS_ARM64",
+                "-D_MACOS_64_",
                 "-o",
                 "${workspaceFolder}/bin/vkmr.app"
             ],
