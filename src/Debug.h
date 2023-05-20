@@ -10,6 +10,7 @@
 // C++ Standard Library Headers
 #include <string>
 #include <sstream>
+#include <iomanip>
 #if !defined (_WIN32)
 #include <iostream>
 #endif
@@ -54,11 +55,29 @@ void debug_print_bits_and_bytes(const T* data, size_t count) {
             oss << bits.str( );
             oss << " (";
             oss << std::hex << std::setw( 2 ) << std::setfill( '0' ) << static_cast<int>( *p ) << std::dec;
-            oss << ") ";
+            oss << ")";
         }
-        oss << std::endl;
+        oss << " == (" << (*(data + c)) << ")" << std::endl;
     }
 
 	OutputDebugStringStream( oss );
 }
+
+template <typename T>
+std::ostringstream print_bytes_ex(const T* data, size_t count) {
+
+	std::ostringstream oss;
+
+    // For each (data) element..
+    for (decltype(count) c = 0; c < count; ++c){
+        const auto ptr = reinterpret_cast<const unsigned char*>( data + c );
+        // For each byte..
+        for (size_t t = 0; t < sizeof( T ); ++t){
+            const auto p = (ptr + t);
+            oss << std::hex << std::setw( 2 ) << std::setfill( '0' ) << static_cast<int>( *p ) << std::dec;
+        }
+    }
+    return oss;
+}
+
 #endif // __VK_MERKLE_ROOTS_DEBUG__

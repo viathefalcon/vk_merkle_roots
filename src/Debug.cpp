@@ -9,7 +9,6 @@
 #endif // _WIN32
 
 // C++ Standard Library Headers
-#include <iomanip>
 #if !defined (_DEBUG)
 #include <iostream>
 #endif

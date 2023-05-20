@@ -1,4 +1,4 @@
-// Main.cpp: defines the entry point for the application
+// SHA-256vk.cpp: defines the functions for computing SHA-256 hashes with Vulkan
 //
 
 // Macros
@@ -25,27 +25,20 @@
 // Local Project Headers
 #include "Debug.h"
 #include "SHA-256vk.h"
-#include "SHA-256plus.h"
 
 // Functions
 //
 
+int vkSha256(const char* arg, size_t size) {
 #if defined (VULKAN_SUPPORT)
-// Vulkan (test) driver
-int vkTest() {
     using namespace std;
 
-    // Determine the amount of memory we want
-    const uint32_t uValueCount = 256;
-    const VkDeviceSize vkBufferSize = sizeof( uint32_t ) * uValueCount;
-    const VkDeviceSize vkMemorySize = vkBufferSize * 2;
-
     // Read in the shader bytes
-    std::ifstream ifs( "squares.spv", std::ios::binary | std::ios::ate );
-    const auto size = ifs.tellg( );
+    std::ifstream ifs( "SHA-256.spv", std::ios::binary | std::ios::ate );
+    const auto g = ifs.tellg( );
     ifs.seekg( 0 );
-    std::vector<uint32_t> code( size / sizeof( uint32_t ) );
-    ifs.read( reinterpret_cast<char*>( code.data( ) ), size );
+    std::vector<uint32_t> code( g / sizeof( uint32_t ) );
+    ifs.read( reinterpret_cast<char*>( code.data( ) ), g );
     ifs.close( );
 
     VkApplicationInfo vkAppInfo = {};
@@ -146,25 +139,39 @@ int vkTest() {
             }
 
             // Create some buffers
-            VkBuffer vkBufferIn = VK_NULL_HANDLE, vkBufferOut = VK_NULL_HANDLE;
+            VkBuffer vkBufferInputs = VK_NULL_HANDLE, vkBufferStarts = VK_NULL_HANDLE, vkBufferSizes = VK_NULL_HANDLE, vkBufferResults = VK_NULL_HANDLE;
             if (vkResult == VK_SUCCESS){
                 VkBufferCreateInfo vkBufferCreateInfo = {};
                 vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
                 vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
                 vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-                vkBufferCreateInfo.size = vkBufferSize;
                 vkBufferCreateInfo.queueFamilyIndexCount = 1;
                 vkBufferCreateInfo.pQueueFamilyIndices = &uQueueFamilyIdx;
-                vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferIn );
-                if (vkResult == VK_SUCCESS){
-                    vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferOut );
-                }else{
-                    vkBufferIn = VK_NULL_HANDLE;
+
+                // A buffer for the argument
+                uint32_t wc = size / sizeof( uint32_t );
+                if ((size % sizeof( uint32_t )) > 0){
+                    wc += 1;
                 }
-                if (vkResult != VK_SUCCESS){
-                    vkBufferOut = VK_NULL_HANDLE;
+                vkBufferCreateInfo.size = wc * sizeof( uint32_t );
+                vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferInputs );
+                if (vkResult == VK_SUCCESS){
+                    // A buffer for the starting positions (offsets)
+                    vkBufferCreateInfo.size = sizeof( uint32_t );
+                    vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferStarts );
+                }
+                if (vkResult == VK_SUCCESS){
+                    // A buffer for the input sizes
+                    vkBufferCreateInfo.size = sizeof( uint32_t );
+                    vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferSizes );
+                }
+                if (vkResult == VK_SUCCESS){
+                    // A buffer for the outputs
+                    vkBufferCreateInfo.size = sizeof( VkSha256Result );
+                    vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferResults );
                 }
             }
+            vector<VkBuffer> buffers = { vkBufferInputs, vkBufferStarts, vkBufferSizes, vkBufferResults };
 
             // Get the properties of the device's physical memory
             VkPhysicalDeviceMemoryProperties vkPhysicalDeviceMemoryProperties;
@@ -174,12 +181,9 @@ int vkTest() {
                 // Get the properties of the memory we want to back our input and output buffers
                 VkDeviceSize vkRequiredMemorySize = 0;
                 uint32_t uMemoryTypeFilter = 0;
-                VkBuffer vkBuffers[] = { vkBufferIn, vkBufferOut };
-                for (uint32_t u = 0; u < 2; ++u) {
-                    VkBuffer vkBuffer = *(vkBuffers + u);
-
+                for (auto it = buffers.begin( ), end = buffers.end( ); it != end; ++it){
                     VkMemoryRequirements vkMemoryRequirements = {};
-                    vkGetBufferMemoryRequirements( vkDevice, vkBuffer, &vkMemoryRequirements );
+                    vkGetBufferMemoryRequirements( vkDevice, (*it), &vkMemoryRequirements );
 
                     // Accumumlate
                     vkRequiredMemorySize += vkMemoryRequirements.size;
@@ -212,12 +216,9 @@ int vkTest() {
 
                 // Sum up the required memeory
                 VkDeviceSize vkRequiredMemorySize = 0;
-                VkBuffer vkBuffers[] = { vkBufferIn, vkBufferOut };
-                for (uint32_t u = 0; u < 2; ++u) {
-                    VkBuffer vkBuffer = *(vkBuffers + u);
-
+                for (auto it = buffers.begin( ), end = buffers.end( ); it != end; ++it){
                     VkMemoryRequirements vkMemoryRequirements = {};
-                    vkGetBufferMemoryRequirements( vkDevice, vkBuffer, &vkMemoryRequirements );
+                    vkGetBufferMemoryRequirements( vkDevice, (*it), &vkMemoryRequirements );
 
                     // Accumumlate
                     vkRequiredMemorySize += vkMemoryRequirements.size;
@@ -231,25 +232,42 @@ int vkTest() {
                 VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
                 vkResult = vkAllocateMemory( vkDevice, &vkMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
 
-                // Populate
+                // Bind the buffers (backwards for some reason)
+                VkDeviceSize vkMemoryOffset = 0U;
                 if (vkResult == VK_SUCCESS){
-                    vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkMemorySize, 0, reinterpret_cast<void**>( &ptr ) );
-                }else{
-                    vkDeviceMemory = VK_NULL_HANDLE;
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferResults, vkDeviceMemory, vkMemoryOffset );
                 }
                 if (vkResult == VK_SUCCESS){
-                    for (uint32_t u = 0; u < uValueCount; ++u){
-                        *(ptr + u) = u;
-                    }
-                    vkUnmapMemory( vkDevice, vkDeviceMemory );
+                    vkMemoryOffset += sizeof( VkSha256Result );
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferSizes, vkDeviceMemory, vkMemoryOffset );
+                }
+                if (vkResult == VK_SUCCESS){
+                    vkMemoryOffset += sizeof( uint32_t );
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferStarts, vkDeviceMemory, vkMemoryOffset );
+                }
+                if (vkResult == VK_SUCCESS){
+                    vkMemoryOffset += sizeof( uint32_t );
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferInputs, vkDeviceMemory, vkMemoryOffset );
                 }
 
-                // Bind the input/output buffers
+                // Populate the memory
+                uint8_t* pMapped = VK_NULL_HANDLE;
                 if (vkResult == VK_SUCCESS){
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferIn, vkDeviceMemory, 0 );
+                    vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkRequiredMemorySize, 0, reinterpret_cast<void**>( &pMapped ) );
                 }
                 if (vkResult == VK_SUCCESS){
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferOut, vkDeviceMemory, vkBufferSize );
+                    std::memset( pMapped, 0, vkRequiredMemorySize );
+
+                    // Copy the string into the end of the buffer
+                    std::memcpy( pMapped + vkMemoryOffset, arg, size );
+
+                    // Then the size
+                    vkMemoryOffset -= (2 * sizeof( uint32_t ));
+                    const uint32_t u = static_cast<uint32_t>( size );
+                    std::memcpy( pMapped + vkMemoryOffset, &u, sizeof( u ) );
+
+                    // Unap
+                    vkUnmapMemory( vkDevice, vkDeviceMemory );
                 }
 
                 // Create the shader module
@@ -272,13 +290,19 @@ int vkTest() {
                     vkDescriptorSetLayoutBinding1.descriptorCount = 1;
                     VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding2 = vkDescriptorSetLayoutBinding1;
                     vkDescriptorSetLayoutBinding2.binding = 1;
-                    VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBindings[2] = {
+                    VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding3 = vkDescriptorSetLayoutBinding1;
+                    vkDescriptorSetLayoutBinding3.binding = 2;
+                    VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding4 = vkDescriptorSetLayoutBinding1;
+                    vkDescriptorSetLayoutBinding4.binding = 3;
+                    VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBindings[] = {
                         vkDescriptorSetLayoutBinding1,
-                        vkDescriptorSetLayoutBinding2
+                        vkDescriptorSetLayoutBinding2,
+                        vkDescriptorSetLayoutBinding3,
+                        vkDescriptorSetLayoutBinding4
                     };
                     VkDescriptorSetLayoutCreateInfo vkDescriptorSetLayoutCreateInfo = {};
                     vkDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                    vkDescriptorSetLayoutCreateInfo.bindingCount = 2;
+                    vkDescriptorSetLayoutCreateInfo.bindingCount = 4;
                     vkDescriptorSetLayoutCreateInfo.pBindings = vkDescriptorSetLayoutBindings;
                     vkResult = vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, VK_NULL_HANDLE, &vkDescriptorSetLayout );
                 }
@@ -313,7 +337,7 @@ int vkTest() {
                 if (vkResult == VK_SUCCESS){
                     VkDescriptorPoolSize vkDescriptorPoolSize = {};
                     vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                    vkDescriptorPoolSize.descriptorCount = 2;
+                    vkDescriptorPoolSize.descriptorCount = 4;
                     VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo = {};
                     vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
                     vkDescriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -336,32 +360,55 @@ int vkTest() {
 
                 // Update the descriptor set
                 if (vkResult == VK_SUCCESS){
-                    VkDescriptorBufferInfo vkDescriptorBufferIn = {};
-                    vkDescriptorBufferIn.buffer = vkBufferIn;
-                    vkDescriptorBufferIn.range = vkBufferSize;
-                    VkDescriptorBufferInfo vkDescriptorBufferOut = {};
-                    vkDescriptorBufferOut.buffer = vkBufferOut;
-                    vkDescriptorBufferOut.range = vkBufferSize;
+                    VkDescriptorBufferInfo vkDescriptorBufferInputs = {};
+                    vkDescriptorBufferInputs.buffer = vkBufferInputs;
+                    vkDescriptorBufferInputs.range = VK_WHOLE_SIZE;
+                    VkDescriptorBufferInfo vkDescriptorBufferStarts = {};
+                    vkDescriptorBufferStarts.buffer = vkBufferStarts;
+                    vkDescriptorBufferStarts.range = VK_WHOLE_SIZE;
+                    VkDescriptorBufferInfo vkDescriptorBufferSizes = {};
+                    vkDescriptorBufferSizes.buffer = vkBufferSizes;
+                    vkDescriptorBufferSizes.range = VK_WHOLE_SIZE;
+                    VkDescriptorBufferInfo vkDescriptorBufferResults = {};
+                    vkDescriptorBufferResults.buffer = vkBufferResults;
+                    vkDescriptorBufferResults.range = VK_WHOLE_SIZE;
 
-                    VkWriteDescriptorSet vkWriteDescriptorSetIn = {};
-                    vkWriteDescriptorSetIn.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    vkWriteDescriptorSetIn.dstSet = vkDescriptorSet;
-                    vkWriteDescriptorSetIn.descriptorCount = 1;
-                    vkWriteDescriptorSetIn.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                    vkWriteDescriptorSetIn.pBufferInfo = &vkDescriptorBufferIn;
-                    VkWriteDescriptorSet vkWriteDescriptorSetOut = {};
-                    vkWriteDescriptorSetOut.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    vkWriteDescriptorSetOut.dstSet = vkDescriptorSet;
-                    vkWriteDescriptorSetOut.dstBinding = 1;
-                    vkWriteDescriptorSetOut.descriptorCount = 1;
-                    vkWriteDescriptorSetOut.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                    vkWriteDescriptorSetOut.pBufferInfo = &vkDescriptorBufferOut;
+                    VkWriteDescriptorSet vkWriteDescriptorSetInputs = {};
+                    vkWriteDescriptorSetInputs.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    vkWriteDescriptorSetInputs.dstSet = vkDescriptorSet;
+                    vkWriteDescriptorSetInputs.descriptorCount = 1;
+                    vkWriteDescriptorSetInputs.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    vkWriteDescriptorSetInputs.pBufferInfo = &vkDescriptorBufferInputs;
+                    VkWriteDescriptorSet vkWriteDescriptorSetStarts = {};
+                    vkWriteDescriptorSetStarts.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    vkWriteDescriptorSetStarts.dstSet = vkDescriptorSet;
+                    vkWriteDescriptorSetStarts.dstBinding = 1;
+                    vkWriteDescriptorSetStarts.descriptorCount = 1;
+                    vkWriteDescriptorSetStarts.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    vkWriteDescriptorSetStarts.pBufferInfo = &vkDescriptorBufferStarts;
+                    VkWriteDescriptorSet vkWriteDescriptorSetSizes = {};
+                    vkWriteDescriptorSetSizes.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    vkWriteDescriptorSetSizes.dstSet = vkDescriptorSet;
+                    vkWriteDescriptorSetSizes.dstBinding = 2;
+                    vkWriteDescriptorSetSizes.descriptorCount = 1;
+                    vkWriteDescriptorSetSizes.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    vkWriteDescriptorSetSizes.pBufferInfo = &vkDescriptorBufferSizes;
+                    VkWriteDescriptorSet vkWriteDescriptorSetResults = {};
+                    vkWriteDescriptorSetResults.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    vkWriteDescriptorSetResults.dstSet = vkDescriptorSet;
+                    vkWriteDescriptorSetResults.dstBinding = 3;
+                    vkWriteDescriptorSetResults.descriptorCount = 1;
+                    vkWriteDescriptorSetResults.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    vkWriteDescriptorSetResults.pBufferInfo = &vkDescriptorBufferResults;
 
-                    VkWriteDescriptorSet vkWriteDescriptorSets[2] = {
-                        vkWriteDescriptorSetIn,
-                        vkWriteDescriptorSetOut
+
+                    VkWriteDescriptorSet vkWriteDescriptorSets[] = {
+                        vkWriteDescriptorSetInputs,
+                        vkWriteDescriptorSetStarts,
+                        vkWriteDescriptorSetSizes,
+                        vkWriteDescriptorSetResults
                     };
-                    vkUpdateDescriptorSets( vkDevice, 2, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
+                    vkUpdateDescriptorSets( vkDevice, 4, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
                 }
 
                 // Create the command pool
@@ -394,7 +441,7 @@ int vkTest() {
                 if (vkResult == VK_SUCCESS){
                     vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipeline );
                     vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipelineLayout, 0, 1, &vkDescriptorSet, 0, VK_NULL_HANDLE );
-                    vkCmdDispatch( vkCommandBuffer, uValueCount, 1, 1 );
+                    vkCmdDispatch( vkCommandBuffer, 1, 1, 1 );
                     vkResult = vkEndCommandBuffer( vkCommandBuffer );
                 }
 
@@ -426,13 +473,19 @@ int vkTest() {
                     vkResult = vkWaitForFences( vkDevice, 1, &vkFence, true, uint64_t(-1) );
                 }
                 if (vkResult == VK_SUCCESS){
-                    vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkMemorySize, 0, reinterpret_cast<void**>( &ptr ) );
+                    const VkDeviceSize vkMemorySize = sizeof( VkSha256Result );
+                    vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkMemorySize, 0, reinterpret_cast<void**>( &pMapped ) );
                 }
                 if (vkResult == VK_SUCCESS){
-                    for (uint32_t u = 0, v = uValueCount; u < uValueCount; ++u, ++v){
-                        std::cout << "Computed " << *(ptr + u) << " => " << *(ptr + v) << endl;
-                    }
+                    // Copy out the result
+                    VkSha256Result result = {};
+                    std::memcpy( &result, pMapped, sizeof( VkSha256Result ) );
+
                     vkUnmapMemory( vkDevice, vkDeviceMemory );
+
+                    std::cout << "Vulkan:- " << arg << " >> " << print_bytes_ex( result.data, SHA256_WC ).str( ) << std::endl;
+                }else{
+                    cerr << "Failed to retrieve the result" << std::endl;
                 }
 
                 // Cleanup
@@ -467,11 +520,12 @@ int vkTest() {
                     vkFreeMemory( vkDevice, vkDeviceMemory, VK_NULL_HANDLE );
                 }
             }
-            if (vkBufferIn){
-                vkDestroyBuffer( vkDevice, vkBufferIn, VK_NULL_HANDLE );
-            }
-            if (vkBufferOut){
-                vkDestroyBuffer( vkDevice, vkBufferOut, VK_NULL_HANDLE );
+            for (auto it = buffers.begin( ), end = buffers.end( ); it != end; ++it){
+                auto vkBuffer = (*it);
+                if (vkBuffer == VK_NULL_HANDLE){
+                    continue;
+                }                
+                vkDestroyBuffer( vkDevice, vkBuffer, VK_NULL_HANDLE );
             }
             if (vkDevice){
                 vkDestroyDevice( vkDevice, VK_NULL_HANDLE );
@@ -486,48 +540,7 @@ int vkTest() {
 
     cerr << "Failed to initialise Vulkan" << endl;
     return 1;
-}
-
+#else
+    std::cerr << "Vulkan not supported!" << std::endl;
 #endif
-
-// Gives the entry-point for the application
-int main(int argc, const char* argv[]) {
-
-    //int result = vkTest( );
-    int result = 0;
-    for (int i = 1; i < argc; ++i) {
-        using std::cout;
-
-        const auto arg = std::string( argv[i] );
-        const auto hashed = cpu_sha256( arg );
-        cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
-
-        /*
-        // Allocate an array of 32-bit words
-        uint32_t wc = arg.size( ) / sizeof( uint32_t );
-        if ((arg.size( ) % sizeof( uint32_t )) > 0){
-            wc += 1;
-        }
-        uint32_t* words = new uint32_t[wc];
-
-        // Populate it
-        for (decltype(wc) w = 0; w < wc; ++w){
-            *(words + w) = 0U;
-        }
-        std::memcpy( words, arg.data( ), arg.size( ) );
-
-        // Use it
-        const auto sha256_result = sha256w( words, arg.size( ) );
-        cout << arg << " >> " << print_bytes_ex( sha256_result.words, SHA256_WC ).str( ) << std::endl;
-
-        // Cleanup
-        delete[] words;
-        */
-
-#if defined (VULKAN_SUPPORT)
-        // Try with Vulkan
-        vkSha256( arg.data( ), arg.size( ) );
-#endif
-    }
-    return result;
 }

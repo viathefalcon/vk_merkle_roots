@@ -1,4 +1,4 @@
-// SHA-256.cpp: defines the class(es), type(s) and function(s) for generating SHA-256 hashes.
+// SHA-256plus.cpp: defines the class(es), type(s) and function(s) for generating SHA-256 hashes.
 
 // Includes
 //
@@ -20,7 +20,7 @@
 #include "Debug.h"
 
 // Declarations
-#include "SHA-256.h"
+#include "SHA-256plus.h"
 
 // Macros
 //
