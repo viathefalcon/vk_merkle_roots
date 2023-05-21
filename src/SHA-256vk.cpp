@@ -539,8 +539,8 @@ int vkSha256(const char* arg, size_t size) {
     }
 
     cerr << "Failed to initialise Vulkan" << endl;
-    return 1;
 #else
     std::cerr << "Vulkan not supported!" << std::endl;
 #endif
+    return 1;
 }

@@ -122,6 +122,7 @@
             "args": [
                 "-std=c++11",
                 "src/*.cpp",
+                "src/*.c",
                 "-D_MACOS_64_",
                 "-o",
                 "${workspaceFolder}/bin/vkmr.app"
