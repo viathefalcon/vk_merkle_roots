@@ -14,6 +14,7 @@
 // C++ Standard Headers
 #include <iostream>
 #include <fstream>
+#include <cstring>
 #include <vector>
 #include <string>
 
@@ -40,6 +41,7 @@ int vkSha256(const char* arg, size_t size) {
     std::vector<uint32_t> code( g / sizeof( uint32_t ) );
     ifs.read( reinterpret_cast<char*>( code.data( ) ), g );
     ifs.close( );
+    std::cout << "Loaded " << code.size() << " (32-bit) word(s) of shader code." << endl;
 
     VkApplicationInfo vkAppInfo = {};
     vkAppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -49,6 +51,10 @@ int vkSha256(const char* arg, size_t size) {
     vkAppInfo.engineVersion = VK_MAKE_API_VERSION(0, 0, 0, 0);
     vkAppInfo.apiVersion = VK_API_VERSION_1_3;
 
+    VkInstanceCreateInfo vkCreateInfo = {};
+    vkCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    vkCreateInfo.pApplicationInfo = &vkAppInfo;
+#if !defined(_ONDECK_)
     VkValidationFeatureEnableEXT vkValidationFeatureEnableEXT[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
     VkValidationFeaturesEXT vkValidationFeaturesEXT = {};
     vkValidationFeaturesEXT.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
@@ -57,14 +63,12 @@ int vkSha256(const char* arg, size_t size) {
 
     const char* szLayerName = "VK_LAYER_KHRONOS_validation";
     const char* pszExtensionNames[] = { "VK_EXT_validation_features", "VK_EXT_debug_utils" };
-    VkInstanceCreateInfo vkCreateInfo = {};
-    vkCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    vkCreateInfo.pApplicationInfo = &vkAppInfo;
     vkCreateInfo.enabledLayerCount = 1;
     vkCreateInfo.ppEnabledLayerNames = &szLayerName;
     vkCreateInfo.enabledExtensionCount = 2;
     vkCreateInfo.ppEnabledExtensionNames = pszExtensionNames;
     vkCreateInfo.pNext = &vkValidationFeaturesEXT;
+#endif
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult vkResult = vkCreateInstance( &vkCreateInfo, VK_NULL_HANDLE, &instance );
