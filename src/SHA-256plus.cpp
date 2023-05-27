@@ -19,7 +19,8 @@
 // Local Project Headers
 #include "Debug.h"
 
-// Declarations
+// Definitions & declarations
+#include "SHA-256defs.h"
 #include "SHA-256plus.h"
 
 // Macros
@@ -33,12 +34,6 @@
 #ifndef __LITTLE_ENDIAN__
 #define __LITTLE_ENDIAN__ 1
 #endif
-
-#define SWOP_ENDS_U32(x) \
-	(((x) >> 24) & 0x000000FF) | \
-	(((x) >> 8) & 0x0000FF00) | \
-	(((x) << 8) & 0x00FF0000) | \
-	(((x) << 24) & 0xFF000000)
 
 #ifdef __LITTLE_ENDIAN__ 
 #define GET_U32_BE(x) SWOP_ENDS_U32(x)
@@ -61,18 +56,6 @@
 #else
 #define GET_U64_BE(x) (x)
 #endif
-
-#define SHR(n,x) (((x) & 0xFFFFFFFF) >> (n))
-
-#define ROTR(n,x) (SHR( (n), (x) ) | ((x) << (32 - (n))))
-
-#define Sigma0(x) (ROTR( 2, (x) ) ^ ROTR( 13, (x) ) ^ ROTR( 22, (x) ))
-#define Sigma1(x) (ROTR( 6, (x) ) ^ ROTR( 11, (x) ) ^ ROTR( 25, (x) ))
-#define sigma0(x) (ROTR( 7, (x) ) ^ ROTR( 18, (x) ) ^ SHR( 3, (x) ))
-#define sigma1(x) (ROTR( 17, (x) ) ^ ROTR( 19, (x) ) ^ SHR( 10, (x) ))
-
-#define Ch(x,y,z) (((x) & (y)) ^ (~(x) & (z)))
-#define Maj(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
 
 #define clear_message_block(M, words) \
 	do { \

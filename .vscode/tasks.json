@@ -42,7 +42,6 @@
                 "/nologo",
                 "/D_WIN32",
                 "/I\"C:\\Development\\Libraries\\VulkanSDK\\1.3.239.0\\Include\"",
-                "${workspaceFolder}\\src\\*.c",
                 "${workspaceFolder}\\src\\*.cpp",
                 "vulkan-1.lib",
                 "/Fe${workspaceFolder}\\bin\\vkmr.exe",
@@ -113,7 +112,6 @@
             "args": [
                 "-std=c++11",
                 "-D_ONDECK_",
-                "${workspaceFolder}/src/*.c",
                 "${workspaceFolder}/src/*.cpp",
                 "-I/home/deck/Workspaces/Libraries/Vulkan/x86_64/include",
                 "-L/home/deck/Workspaces/Libraries/Vulkan/x86_64/lib",
@@ -141,7 +139,6 @@
             "args": [
                 "-std=c++11",
                 "src/*.cpp",
-                "src/*.c",
                 "-D_MACOS_64_",
                 "-o",
                 "${workspaceFolder}/bin/vkmr.app"

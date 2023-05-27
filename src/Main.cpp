@@ -504,28 +504,6 @@ int main(int argc, const char* argv[]) {
         const auto hashed = cpu_sha256( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
 
-        /*
-        // Allocate an array of 32-bit words
-        uint32_t wc = arg.size( ) / sizeof( uint32_t );
-        if ((arg.size( ) % sizeof( uint32_t )) > 0){
-            wc += 1;
-        }
-        uint32_t* words = new uint32_t[wc];
-
-        // Populate it
-        for (decltype(wc) w = 0; w < wc; ++w){
-            *(words + w) = 0U;
-        }
-        std::memcpy( words, arg.data( ), arg.size( ) );
-
-        // Use it
-        const auto sha256_result = sha256w( words, arg.size( ) );
-        cout << arg << " >> " << print_bytes_ex( sha256_result.words, SHA256_WC ).str( ) << std::endl;
-
-        // Cleanup
-        delete[] words;
-        */
-
 #if defined (VULKAN_SUPPORT)
         // Try with Vulkan
         vkSha256( arg.data( ), arg.size( ) );
