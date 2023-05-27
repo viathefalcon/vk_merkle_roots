@@ -175,7 +175,8 @@ int vkSha256(const char* arg, size_t size) {
                     vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferResults );
                 }
             }
-            vector<VkBuffer> buffers = { vkBufferInputs, vkBufferStarts, vkBufferSizes, vkBufferResults };
+            vector<VkBuffer> buffers = { vkBufferResults, vkBufferSizes, vkBufferStarts, vkBufferInputs };
+            VkDeviceSize vkRequiredMemorySize = 0;
 
             // Get the properties of the device's physical memory
             VkPhysicalDeviceMemoryProperties vkPhysicalDeviceMemoryProperties;
@@ -183,7 +184,6 @@ int vkSha256(const char* arg, size_t size) {
             uint32_t uMemoryTypeIdx = vkPhysicalDeviceMemoryProperties.memoryTypeCount;
             if (vkResult == VK_SUCCESS){
                 // Get the properties of the memory we want to back our input and output buffers
-                VkDeviceSize vkRequiredMemorySize = 0;
                 uint32_t uMemoryTypeFilter = 0;
                 for (auto it = buffers.begin( ), end = buffers.end( ); it != end; ++it){
                     VkMemoryRequirements vkMemoryRequirements = {};
@@ -192,6 +192,11 @@ int vkSha256(const char* arg, size_t size) {
                     // Accumumlate
                     vkRequiredMemorySize += vkMemoryRequirements.size;
                     uMemoryTypeFilter |= vkMemoryRequirements.memoryTypeBits;
+
+                    // Accumulate the offset such that the memory is correctly aligned
+                    // for the buffer
+                    const VkDeviceSize vkOffset = (vkRequiredMemorySize % vkMemoryRequirements.alignment);
+                    vkRequiredMemorySize += vkOffset;
                 }
 
                 // Scan for a memory to back our input and output buffers
@@ -218,16 +223,6 @@ int vkSha256(const char* arg, size_t size) {
             if (uMemoryTypeIdx < vkPhysicalDeviceMemoryProperties.memoryTypeCount){
                 uint32_t* ptr = VK_NULL_HANDLE;
 
-                // Sum up the required memeory
-                VkDeviceSize vkRequiredMemorySize = 0;
-                for (auto it = buffers.begin( ), end = buffers.end( ); it != end; ++it){
-                    VkMemoryRequirements vkMemoryRequirements = {};
-                    vkGetBufferMemoryRequirements( vkDevice, (*it), &vkMemoryRequirements );
-
-                    // Accumumlate
-                    vkRequiredMemorySize += vkMemoryRequirements.size;
-                }
-
                 // Allocate
                 VkMemoryAllocateInfo vkMemoryAllocateInfo = {};
                 vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -236,39 +231,54 @@ int vkSha256(const char* arg, size_t size) {
                 VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
                 vkResult = vkAllocateMemory( vkDevice, &vkMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
 
-                // Bind the buffers (backwards for some reason)
-                VkDeviceSize vkMemoryOffset = 0U;
-                if (vkResult == VK_SUCCESS){
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferResults, vkDeviceMemory, vkMemoryOffset );
-                }
-                if (vkResult == VK_SUCCESS){
-                    vkMemoryOffset += sizeof( VkSha256Result );
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferSizes, vkDeviceMemory, vkMemoryOffset );
-                }
-                if (vkResult == VK_SUCCESS){
-                    vkMemoryOffset += sizeof( uint32_t );
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferStarts, vkDeviceMemory, vkMemoryOffset );
-                }
-                if (vkResult == VK_SUCCESS){
-                    vkMemoryOffset += sizeof( uint32_t );
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferInputs, vkDeviceMemory, vkMemoryOffset );
-                }
-
-                // Populate the memory
+                // Map the memory into our address space
                 uint8_t* pMapped = VK_NULL_HANDLE;
                 if (vkResult == VK_SUCCESS){
+                    cout << "Allocated " << vkRequiredMemorySize << " bytes of GPU-accessible memeory" << std::endl;
                     vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkRequiredMemorySize, 0, reinterpret_cast<void**>( &pMapped ) );
                 }
                 if (vkResult == VK_SUCCESS){
                     std::memset( pMapped, 0, vkRequiredMemorySize );
+                }
 
-                    // Copy the string into the end of the buffer
-                    std::memcpy( pMapped + vkMemoryOffset, arg, size );
+                // Bind (and populate) the buffers
+                VkDeviceSize vkMemoryOffset = 0U;
+                if (vkResult == VK_SUCCESS){
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferResults, vkDeviceMemory, vkMemoryOffset );
 
-                    // Then the size
-                    vkMemoryOffset -= (2 * sizeof( uint32_t ));
+                    VkMemoryRequirements vkMemoryRequirements = {};
+                    vkGetBufferMemoryRequirements( vkDevice, vkBufferResults, &vkMemoryRequirements );
+                    vkMemoryOffset += vkMemoryRequirements.size;
+                }
+                if (vkResult == VK_SUCCESS){
+                    VkMemoryRequirements vkMemoryRequirements = {};
+                    vkGetBufferMemoryRequirements( vkDevice, vkBufferSizes, &vkMemoryRequirements );
+                    vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
+
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferSizes, vkDeviceMemory, vkMemoryOffset );
+
+                    // Copy the size
                     const uint32_t u = static_cast<uint32_t>( size );
                     std::memcpy( pMapped + vkMemoryOffset, &u, sizeof( u ) );
+                    vkMemoryOffset += vkMemoryRequirements.size;
+                }
+                if (vkResult == VK_SUCCESS){
+                    VkMemoryRequirements vkMemoryRequirements = {};
+                    vkGetBufferMemoryRequirements( vkDevice, vkBufferStarts, &vkMemoryRequirements );
+                    vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
+
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferStarts, vkDeviceMemory, vkMemoryOffset );
+                    vkMemoryOffset += vkMemoryRequirements.size;
+                }
+                if (vkResult == VK_SUCCESS){
+                    VkMemoryRequirements vkMemoryRequirements = {};
+                    vkGetBufferMemoryRequirements( vkDevice, vkBufferInputs, &vkMemoryRequirements );
+                    vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
+
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferInputs, vkDeviceMemory, vkMemoryOffset );
+
+                    // Copy in the string
+                    std::memcpy( pMapped + vkMemoryOffset, arg, size );
 
                     // Unap
                     vkUnmapMemory( vkDevice, vkDeviceMemory );
@@ -404,7 +414,6 @@ int vkSha256(const char* arg, size_t size) {
                     vkWriteDescriptorSetResults.descriptorCount = 1;
                     vkWriteDescriptorSetResults.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     vkWriteDescriptorSetResults.pBufferInfo = &vkDescriptorBufferResults;
-
 
                     VkWriteDescriptorSet vkWriteDescriptorSets[] = {
                         vkWriteDescriptorSetInputs,
