@@ -30,3 +30,27 @@
 #define SHA256_MESSAGE_BLOCK_BYTE_SIZE	(512 >> 3)
 #define SHA256_MESSAGE_BLOCK_WC			(SHA256_MESSAGE_BLOCK_BYTE_SIZE >> 2)
 #define SHA256_WC						8
+
+// Expands to a round of SHA-256
+// (assumes endianess is aligned)
+#define sha256_be_round(M, w) \
+    { \
+        uint W[64] = { 0 }; \
+        for (uint t = 0; t < 64; ++t){ \
+            if (t < SHA256_MESSAGE_BLOCK_WC){ \
+                W[t] = (M)[t]; \
+            }else{ \
+                W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16]; \
+            } \
+            uint T1 = (w).s7 + Sigma1( (w).s4 ) + Ch( (w).s4, (w).s5, (w).s6 ) + c_constants[t] + W[t]; \
+            uint T2 = Sigma0( (w).s0 ) + Maj( (w).s0, (w).s1, (w).s2 ); \
+            (w).s7 = (w).s6; \
+            (w).s6 = (w).s5; \
+            (w).s5 = (w).s4; \
+            (w).s4 = (w).s3 + T1; \
+            (w).s3 = (w).s2; \
+            (w).s2 = (w).s1; \
+            (w).s1 = (w).s0; \
+            (w).s0 = T1 + T2; \
+        } \
+    }

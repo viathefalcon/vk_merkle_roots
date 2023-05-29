@@ -498,16 +498,13 @@ int main(int argc, const char* argv[]) {
     //int result = vkTest( );
     int result = 0;
     for (int i = 1; i < argc; ++i) {
-        using std::cout;
-
         const auto arg = std::string( argv[i] );
         const auto hashed = cpu_sha256( arg );
-        cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
+        std::cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
+    }
 
 #if defined (VULKAN_SUPPORT)
-        // Try with Vulkan
-        vkSha256( arg.data( ), arg.size( ) );
+    vkSha256( argc - 1, argv + 1 );
 #endif
-    }
     return result;
 }

@@ -15,6 +15,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <utility>
 #include <vector>
 #include <string>
 
@@ -30,12 +31,28 @@
 // Functions
 //
 
-int vkSha256(const char* arg, size_t size) {
+int vkSha256(int argc, const char* argv[]) {
 #if defined (VULKAN_SUPPORT)
     using namespace std;
 
+    // Returns a count of the 32-bit words required to store a string
+    auto wc = [](const std::string& str) -> size_t {
+        const auto size = str.size( );
+        const size_t words = size / sizeof( uint32_t );
+        return ((size % sizeof( uint32_t )) == 0)
+            ? words
+            : (words + 1);
+    };
+
+    // Agglomerate the inputs
+    vector<string> args;
+    for (int i = 0; i < argc; ++i){
+        const string arg( argv[i] );
+        args.push_back( move( arg ) );
+    }
+
     // Read in the shader bytes
-    std::ifstream ifs( "SHA-256.spv", std::ios::binary | std::ios::ate );
+    std::ifstream ifs( "SHA-256-n.spv", std::ios::binary | std::ios::ate );
     const auto g = ifs.tellg( );
     ifs.seekg( 0 );
     std::vector<uint32_t> code( g / sizeof( uint32_t ) );
@@ -152,26 +169,25 @@ int vkSha256(const char* arg, size_t size) {
                 vkBufferCreateInfo.queueFamilyIndexCount = 1;
                 vkBufferCreateInfo.pQueueFamilyIndices = &uQueueFamilyIdx;
 
-                // A buffer for the argument
-                uint32_t wc = size / sizeof( uint32_t );
-                if ((size % sizeof( uint32_t )) > 0){
-                    wc += 1;
+                VkDeviceSize vkInputWords = 0;
+                for (auto it = args.cbegin( ), end = args.cend( ); it != end; ++it) {
+                    vkInputWords += wc( *it );
                 }
-                vkBufferCreateInfo.size = wc * sizeof( uint32_t );
+                vkBufferCreateInfo.size = vkInputWords * sizeof( uint32_t );
                 vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferInputs );
                 if (vkResult == VK_SUCCESS){
                     // A buffer for the starting positions (offsets)
-                    vkBufferCreateInfo.size = sizeof( uint32_t );
+                    vkBufferCreateInfo.size = args.size( ) * sizeof( uint32_t );
                     vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferStarts );
                 }
                 if (vkResult == VK_SUCCESS){
                     // A buffer for the input sizes
-                    vkBufferCreateInfo.size = sizeof( uint32_t );
+                    vkBufferCreateInfo.size = args.size( ) * sizeof( uint32_t );
                     vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferSizes );
                 }
                 if (vkResult == VK_SUCCESS){
                     // A buffer for the outputs
-                    vkBufferCreateInfo.size = sizeof( VkSha256Result );
+                    vkBufferCreateInfo.size = args.size( ) * sizeof( VkSha256Result );
                     vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferResults );
                 }
             }
@@ -255,17 +271,32 @@ int vkSha256(const char* arg, size_t size) {
                     vkGetBufferMemoryRequirements( vkDevice, vkBufferSizes, &vkMemoryRequirements );
                     vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
 
-                    vkResult = vkBindBufferMemory( vkDevice, vkBufferSizes, vkDeviceMemory, vkMemoryOffset );
+                    // Copy the sizes
+                    auto pDst = pMapped + vkMemoryOffset;
+                    for (auto it = args.cbegin( ), end = args.cend( ); it != end; ++it){
+                        const auto size = static_cast<uint32_t>( it->size( ) );
+                        std::memcpy( pDst, &size, sizeof( size ) );
+                        pDst += sizeof( size );
+                    }
 
-                    // Copy the size
-                    const uint32_t u = static_cast<uint32_t>( size );
-                    std::memcpy( pMapped + vkMemoryOffset, &u, sizeof( u ) );
+                    vkResult = vkBindBufferMemory( vkDevice, vkBufferSizes, vkDeviceMemory, vkMemoryOffset );
                     vkMemoryOffset += vkMemoryRequirements.size;
                 }
                 if (vkResult == VK_SUCCESS){
                     VkMemoryRequirements vkMemoryRequirements = {};
                     vkGetBufferMemoryRequirements( vkDevice, vkBufferStarts, &vkMemoryRequirements );
                     vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
+
+                    // Calculate and cpoy in the starting positions
+                    uint32_t starting = 0;
+                    auto pDst = pMapped + vkMemoryOffset;
+                    for (auto it = args.cbegin( ), end = args.cend( ); it != end; ++it){
+                        const auto size = sizeof( starting );
+                        std::memcpy( pDst, &starting, size );
+                        pDst += size;
+
+                        starting += wc( *it );
+                    }
 
                     vkResult = vkBindBufferMemory( vkDevice, vkBufferStarts, vkDeviceMemory, vkMemoryOffset );
                     vkMemoryOffset += vkMemoryRequirements.size;
@@ -277,10 +308,14 @@ int vkSha256(const char* arg, size_t size) {
 
                     vkResult = vkBindBufferMemory( vkDevice, vkBufferInputs, vkDeviceMemory, vkMemoryOffset );
 
-                    // Copy in the string
-                    std::memcpy( pMapped + vkMemoryOffset, arg, size );
+                    // Copy in the strings
+                    auto pDst = pMapped + vkMemoryOffset;
+                    for (auto it = args.cbegin( ), end = args.cend( ); it != end; ++it){
+                        std::memcpy( pDst, it->data( ), it->size( ) );
+                        pDst += (sizeof( uint32_t ) * wc( *it ));
+                    }
 
-                    // Unap
+                    // Unmap
                     vkUnmapMemory( vkDevice, vkDeviceMemory );
                 }
 
@@ -454,7 +489,7 @@ int vkSha256(const char* arg, size_t size) {
                 if (vkResult == VK_SUCCESS){
                     vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipeline );
                     vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipelineLayout, 0, 1, &vkDescriptorSet, 0, VK_NULL_HANDLE );
-                    vkCmdDispatch( vkCommandBuffer, 1, 1, 1 );
+                    vkCmdDispatch( vkCommandBuffer, args.size( ), 1, 1 );
                     vkResult = vkEndCommandBuffer( vkCommandBuffer );
                 }
 
@@ -490,13 +525,15 @@ int vkSha256(const char* arg, size_t size) {
                     vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, vkMemorySize, 0, reinterpret_cast<void**>( &pMapped ) );
                 }
                 if (vkResult == VK_SUCCESS){
-                    // Copy out the result
-                    VkSha256Result result = {};
-                    std::memcpy( &result, pMapped, sizeof( VkSha256Result ) );
+                    // Copy out the results
+                    for (auto it = args.cbegin( ), end = args.cend( ); it != end; ++it){
+                        VkSha256Result result = {};
+                        std::memcpy( &result, pMapped, sizeof( VkSha256Result ) );
+                        pMapped += sizeof( VkSha256Result );
 
+                        std::cout << "Vulkan:- " << *it << " (" << wc( *it ) << ") >> " << print_bytes_ex( result.data, SHA256_WC ).str( ) << std::endl;
+                    }
                     vkUnmapMemory( vkDevice, vkDeviceMemory );
-
-                    std::cout << "Vulkan:- " << arg << " >> " << print_bytes_ex( result.data, SHA256_WC ).str( ) << std::endl;
                 }else{
                     cerr << "Failed to retrieve the result" << std::endl;
                 }

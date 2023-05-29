@@ -20,7 +20,7 @@ typedef struct _VkSha256Result {
 // Functions
 //
 
-// Calculates (and prints out) the SHA-256 of the input using Vulkan
-int vkSha256(const char*, size_t);
+// Calculates (and prints out) the SHA-256 of the inputs using Vulkan
+int vkSha256(int, const char* argv[]);
 
 #endif // __SHA_256_VK_H__
