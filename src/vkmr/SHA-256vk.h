@@ -8,7 +8,7 @@
 //
 
 // Local Project Headers
-#include "SHA-256defs.h"
+#include "../common/SHA-256defs.h"
 
 // Types
 //

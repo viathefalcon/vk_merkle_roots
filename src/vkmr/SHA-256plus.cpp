@@ -18,9 +18,9 @@
 
 // Local Project Headers
 #include "Debug.h"
+#include "../common/SHA-256defs.h"
 
 // Definitions & declarations
-#include "SHA-256defs.h"
 #include "SHA-256plus.h"
 
 // Macros

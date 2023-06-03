@@ -45,10 +45,17 @@ int vkSha256(int argc, const char* argv[]) {
     };
 
     // Agglomerate the inputs
+    size_t sum = 0;
     vector<string> args;
     for (int i = 0; i < argc; ++i){
         const string arg( argv[i] );
         args.push_back( move( arg ) );
+
+        sum += arg.size( );
+    }
+    if (sum == 0){
+        // No inputs of any length, so just get out here
+        return 0;
     }
 
     // Read in the shader bytes
