@@ -26,23 +26,14 @@ layout(std430, set = 0, binding = 0) readonly buffer inputs
 	uint data[];
 };
 
-layout(std430, set = 0, binding = 1) readonly buffer starts
+layout(std430, set = 0, binding = 1) readonly buffer metadatas
 {
-	uint start[];
+	VkSha256Metadata metadata[];
 };
 
-layout(std430, set = 0, binding = 2) readonly buffer sizes
+layout(std430, set = 0, binding = 2) writeonly buffer results
 {
-	uint size[];
-};
-
-struct Result {
-	uint data[SHA256_WC];
-};
-
-layout(std430, set = 0, binding = 3) writeonly buffer results
-{
-    Result result[];
+    VkSha256Result result[];
 };
 
 // Constants
@@ -77,8 +68,8 @@ const uint c_constants[] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf,
 void main() {
 	// Get the inputs
 	const uint gid = gl_GlobalInvocationID.x;
-	const uint size = size[gid];
-	const uint start = start[gid];
+	const uint size = metadata[gid].size;
+	const uint start = metadata[gid].start;
 
 	// Set the initial hash value(s)
 	uint H[] = {

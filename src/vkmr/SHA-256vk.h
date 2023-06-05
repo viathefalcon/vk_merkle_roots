@@ -10,13 +10,6 @@
 // Local Project Headers
 #include "../common/SHA-256defs.h"
 
-// Types
-//
-
-typedef struct _VkSha256Result {
-    uint32_t data[SHA256_WC];
-} VkSha256Result;
-
 // Functions
 //
 

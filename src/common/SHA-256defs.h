@@ -54,3 +54,21 @@
             (w).s0 = T1 + T2; \
         } \
     }
+
+// Types
+//
+
+// This is defined for `glslc` (https://www.khronos.org/opengl/wiki/Core_Language_(GLSL)#Standard_macros)
+// but not for other compilers
+#ifndef GL_core_profile
+typedef uint32_t uint;
+#endif
+
+struct VkSha256Result {
+	uint data[SHA256_WC];
+};
+
+struct VkSha256Metadata {
+    uint start;
+    uint size;
+};
