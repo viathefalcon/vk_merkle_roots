@@ -36,23 +36,22 @@ private:
     VkDevice m_vkDevice;
     uint32_t m_queueFamilyIndex;
     VkDeviceSize m_size;
-    VkBuffer m_vkBufferHost, m_vkBufferDevice;
+    std::vector<VkBuffer> m_vkBuffers;
+    std::vector<VkBufferUsageFlags> m_vkUsageFlags;
 
     void reset() {
-        m_vkBufferHost = VK_NULL_HANDLE;
-        m_vkBufferDevice = VK_NULL_HANDLE;
+        m_vkUsageFlags.clear( );
+        m_vkBuffers.clear( );
         m_queueFamilyIndex = 0;
         m_size = 0U;
         m_vkDevice = VK_NULL_HANDLE;
     }
 
     void release() {
-        if (m_vkBufferHost != VK_NULL_HANDLE){
-            ::vkDestroyBuffer( m_vkDevice, m_vkBufferHost, VK_NULL_HANDLE );
+        for (auto vkBuffer : m_vkBuffers){
+            ::vkDestroyBuffer( m_vkDevice, vkBuffer, VK_NULL_HANDLE );
         }
-        if (m_vkBufferDevice != VK_NULL_HANDLE){
-            ::vkDestroyBuffer( m_vkDevice, m_vkBufferDevice, VK_NULL_HANDLE );
-        }
+        m_vkBuffers.clear( );
     }
 
 public:
@@ -60,14 +59,13 @@ public:
         reset( );
     }
 
-    VkBufferSet(VkDevice vkDevice, uint32_t queueFamilyIndex, VkDeviceSize size) noexcept:
+    VkBufferSet(VkDevice vkDevice, uint32_t queueFamilyIndex, VkDeviceSize size, const std::vector<VkBufferUsageFlags>& vkUsageFlags) noexcept:
         m_vkDevice( vkDevice ),
         m_queueFamilyIndex( queueFamilyIndex ),
         m_size( size ),
-        m_vkBufferHost( VK_NULL_HANDLE ),
-        m_vkBufferDevice( VK_NULL_HANDLE ) {
+        m_vkUsageFlags( vkUsageFlags ) {
 
-        // Create the host-side buffer
+        // Create the buffers
         VkBufferCreateInfo vkBufferCreateInfo = {};
         vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -75,26 +73,19 @@ public:
         vkBufferCreateInfo.queueFamilyIndexCount = 1;
         vkBufferCreateInfo.pQueueFamilyIndices = &(m_queueFamilyIndex);
         vkBufferCreateInfo.size = size;
-        VkResult vkResult = ::vkCreateBuffer(
-            vkDevice,
-            &vkBufferCreateInfo,
-            VK_NULL_HANDLE,
-            &m_vkBufferHost
-        );
-        if (vkResult != VK_SUCCESS){
-            m_vkBufferHost = VK_NULL_HANDLE;
-        }
+        for (VkBufferUsageFlags usage : m_vkUsageFlags){
+            vkBufferCreateInfo.usage = usage;
 
-        // The device-side buffer is similar
-        vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        vkResult = ::vkCreateBuffer(
-            vkDevice,
-            &vkBufferCreateInfo,
-            VK_NULL_HANDLE,
-            &m_vkBufferDevice
-        );
-        if (vkResult != VK_SUCCESS){
-            m_vkBufferDevice = VK_NULL_HANDLE;
+            VkBuffer vkBuffer = VK_NULL_HANDLE;
+            VkResult vkResult = ::vkCreateBuffer(
+                vkDevice,
+                &vkBufferCreateInfo,
+                VK_NULL_HANDLE,
+                &vkBuffer
+            );
+            if (vkResult == VK_SUCCESS){
+                m_vkBuffers.push_back( vkBuffer );
+            }
         }
     }
 
@@ -102,8 +93,8 @@ public:
         m_vkDevice( pair.m_vkDevice ),
         m_queueFamilyIndex( pair.m_queueFamilyIndex ),
         m_size( pair.m_size ),
-        m_vkBufferHost( pair.m_vkBufferHost ),
-        m_vkBufferDevice( pair.m_vkBufferDevice ) {
+        m_vkBuffers( std::move( pair.m_vkBuffers ) ),
+        m_vkUsageFlags( std::move( pair.m_vkUsageFlags ) ) {
 
         pair.reset( );
     }
@@ -122,8 +113,8 @@ public:
             m_vkDevice = pair.m_vkDevice;
             m_queueFamilyIndex = pair.m_queueFamilyIndex;
             m_size = pair.m_size;
-            m_vkBufferHost = pair.m_vkBufferHost;
-            m_vkBufferDevice = pair.m_vkBufferDevice;
+            m_vkBuffers = std::move( pair.m_vkBuffers );
+            m_vkUsageFlags = std::move( pair.m_vkUsageFlags );
 
             pair.reset( );
         }
@@ -133,21 +124,17 @@ public:
     VkBufferSet& operator=(VkBufferSet const&) = delete;
 
     operator bool() const {
-        return !((m_vkBufferHost == VK_NULL_HANDLE) || (m_vkBufferDevice == VK_NULL_HANDLE));
+        return (m_vkBuffers.size( ) == m_vkUsageFlags.size( ));
     }
 
-    VkBuffer host() const {
-        return m_vkBufferHost;
+    VkBuffer operator[](size_t index) const {
+        return m_vkBuffers.at( index );
     }
 
-    VkBuffer device() const {
-        return m_vkBufferDevice;
-    }
-
-    void xfer(VkCommandBuffer vkCommandBuffer) {
+    void xfer(size_t from, size_t to, VkCommandBuffer vkCommandBuffer) {
         VkBufferCopy vkBufferCopy = {};
         vkBufferCopy.size = m_size;
-        vkCmdCopyBuffer( vkCommandBuffer, m_vkBufferHost, m_vkBufferDevice, 1, &vkBufferCopy );
+        vkCmdCopyBuffer( vkCommandBuffer, m_vkBuffers.at( from ), m_vkBuffers.at( to ), 1, &vkBufferCopy );
     }
 };
 
@@ -546,24 +533,23 @@ int vkSha256(int argc, const char* argv[]) {
                 }
 
                 // Create us some buffers
-                VkBuffer vkBufferResults = VK_NULL_HANDLE;
-                VkBufferSet vkBufferSetInput( vkDevice, uQueueFamilyIdx, vkInputWords * sizeof( uint32_t ) );
-                VkBufferSet vkBufferSetMetadata( vkDevice, uQueueFamilyIdx, args.size( ) * sizeof( VkSha256Metadata ) );
-                if (vkBufferSetInput && vkBufferSetInput){
-                    // A buffer for the outputs
-                    VkBufferCreateInfo vkBufferCreateInfo = {};
-                    vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-                    vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-                    vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-                    vkBufferCreateInfo.queueFamilyIndexCount = 1;
-                    vkBufferCreateInfo.pQueueFamilyIndices = &uQueueFamilyIdx;
-                    vkBufferCreateInfo.size = args.size( ) * sizeof( VkSha256Result );
-                    vkResult = vkCreateBuffer( vkDevice, &vkBufferCreateInfo, VK_NULL_HANDLE, &vkBufferResults );
-                }
+                std::vector<VkBufferUsageFlags> vkOutputBuffersUsageFlags = {
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                };
+                VkBufferSet vkBufferSetResults( vkDevice, uQueueFamilyIdx, args.size( ) * sizeof( VkSha256Result ), vkOutputBuffersUsageFlags );
+                std::vector<VkBufferUsageFlags> vkInputBuffersUsageFlags = {
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                };
+                VkBufferSet vkBufferSetInput( vkDevice, uQueueFamilyIdx, vkInputWords * sizeof( uint32_t ), vkInputBuffersUsageFlags );
+                VkBufferSet vkBufferSetMetadata( vkDevice, uQueueFamilyIdx, args.size( ) * sizeof( VkSha256Metadata ), vkInputBuffersUsageFlags );
+                vkResult = (vkBufferSetResults && vkBufferSetInput && vkBufferSetInput) ? VK_SUCCESS : VK_ERROR_UNKNOWN;
                 if (vkResult == VK_SUCCESS){
                     // Allocate memory for the host-accessible buffers
-                    VkBuffer vkBufferMetadata = vkBufferSetMetadata.host( );
-                    VkBuffer vkBufferInputs = vkBufferSetInput.host( );
+                    VkBuffer vkBufferResults = vkBufferSetResults[1];
+                    VkBuffer vkBufferMetadata = vkBufferSetMetadata[0];
+                    VkBuffer vkBufferInputs = vkBufferSetInput[0];
                     vector<VkBuffer> buffers = { vkBufferResults, vkBufferMetadata, vkBufferInputs };
                     VkMemoryAllocation allocated = vkHostMemoryAllocator.allocate( buffers );
                     if (allocated.vkDeviceMemory == VK_NULL_HANDLE){
@@ -625,7 +611,7 @@ int vkSha256(int argc, const char* argv[]) {
                 }
                 if (vkResult == VK_SUCCESS){
                     // Allocate memery for the device-accessible buffers
-                    vector<VkBuffer> buffers = { vkBufferSetMetadata.device( ), vkBufferSetInput.device( ) };
+                    vector<VkBuffer> buffers = { vkBufferSetResults[0], vkBufferSetMetadata[1], vkBufferSetInput[1] };
                     VkMemoryAllocation allocated = vkDeviceMemoryAllocator.allocate( buffers );
                     if (allocated.vkDeviceMemory == VK_NULL_HANDLE){
                         vkResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -637,8 +623,8 @@ int vkSha256(int argc, const char* argv[]) {
                         vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
                         vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
                         vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
-                        vkBufferSetMetadata.xfer( vkCommandBuffer );
-                        vkBufferSetInput.xfer( vkCommandBuffer );
+                        vkBufferSetMetadata.xfer( 0, 1, vkCommandBuffer );
+                        vkBufferSetInput.xfer( 0, 1, vkCommandBuffer );
                         vkEndCommandBuffer( vkCommandBuffer );
 
                         // Submit to the queue
@@ -738,13 +724,13 @@ int vkSha256(int argc, const char* argv[]) {
                     // Update the descriptor set
                     if (vkResult == VK_SUCCESS){
                         VkDescriptorBufferInfo vkDescriptorBufferInputs = {};
-                        vkDescriptorBufferInputs.buffer = vkBufferSetInput.device( );
+                        vkDescriptorBufferInputs.buffer = vkBufferSetInput[1];
                         vkDescriptorBufferInputs.range = VK_WHOLE_SIZE;
                         VkDescriptorBufferInfo vkDescriptorBufferMetadata = {};
-                        vkDescriptorBufferMetadata.buffer = vkBufferSetMetadata.device( );
+                        vkDescriptorBufferMetadata.buffer = vkBufferSetMetadata[1];
                         vkDescriptorBufferMetadata.range = VK_WHOLE_SIZE;
                         VkDescriptorBufferInfo vkDescriptorBufferResults = {};
-                        vkDescriptorBufferResults.buffer = vkBufferResults;
+                        vkDescriptorBufferResults.buffer = vkBufferSetResults[0];
                         vkDescriptorBufferResults.range = VK_WHOLE_SIZE;
 
                         VkWriteDescriptorSet vkWriteDescriptorSetInputs = {};
@@ -816,6 +802,26 @@ int vkSha256(int argc, const char* argv[]) {
                         vkResult = vkWaitForFences( vkDevice, 1, &vkFence, true, uint64_t(-1) );
                     }
 
+                    // Copy back the results from the GPU
+                    if (vkResult == VK_SUCCESS){
+                        VkCommandBufferBeginInfo vkCommandBufferBeginInfo = {};
+                        vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                        vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                        vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
+                        vkBufferSetResults.xfer( 0, 1, vkCommandBuffer );
+                        vkEndCommandBuffer( vkCommandBuffer );
+
+                        // Submit to the queue
+                        VkSubmitInfo vkSubmitInfo = {};
+                        vkSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                        vkSubmitInfo.commandBufferCount = 1;
+                        vkSubmitInfo.pCommandBuffers = &vkCommandBuffer;
+                        vkResult = vkQueueSubmit( vkQueue, 1, &vkSubmitInfo, VK_NULL_HANDLE );
+                    }
+                    if (vkResult == VK_SUCCESS){
+                        vkQueueWaitIdle( vkQueue );
+                    }
+
                     // Get out the results
                     if (vkResult == VK_SUCCESS){
                         auto vkMemoryMapping = vkHostMemoryAllocator.map( 0 );
@@ -858,9 +864,6 @@ int vkSha256(int argc, const char* argv[]) {
                     if (vkShaderModule){
                         vkDestroyShaderModule( vkDevice, vkShaderModule, VK_NULL_HANDLE );
                     }
-                }
-                if (vkBufferResults != VK_NULL_HANDLE){
-                    vkDestroyBuffer( vkDevice, vkBufferResults, VK_NULL_HANDLE );
                 }
             }
             if (vkCommandPool){
