@@ -277,7 +277,8 @@ public:
                 continue;
             }
 
-            if (vkPhysicalDeviceMemoryProperties.memoryHeaps[vkMemoryType->heapIndex].size < vkMemoryAllocation.vkSize){
+            VkMemoryHeap* pvkMemoryHeap = (vkPhysicalDeviceMemoryProperties.memoryHeaps + vkMemoryType->heapIndex);
+            if (pvkMemoryHeap->size < vkMemoryAllocation.vkSize){
                 continue;
             }
 
@@ -287,6 +288,7 @@ public:
             }
 
             uMemoryTypeIdx = j;
+            std::cout << "Allocating " << vkMemoryAllocation.vkSize << " from memory heap " << vkMemoryType->heapIndex << " of size " << pvkMemoryHeap->size << " (with flags " << pvkMemoryHeap->flags << ")" << std::endl;
             break;
         }
 
@@ -391,25 +393,39 @@ int vkSha256(int argc, const char* argv[]) {
     VkInstanceCreateInfo vkCreateInfo = {};
     vkCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     vkCreateInfo.pApplicationInfo = &vkAppInfo;
+
+    // Tee up the initial set of instance-level extensions we want
+    std::vector<char*> instanceExtNames;
+    instanceExtNames.push_back( VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
+    instanceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME );
 #if !defined(_ONDECK_)
     VkValidationFeatureEnableEXT vkValidationFeatureEnableEXT[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
     VkValidationFeaturesEXT vkValidationFeaturesEXT = {};
     vkValidationFeaturesEXT.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
     vkValidationFeaturesEXT.enabledValidationFeatureCount = 1;
     vkValidationFeaturesEXT.pEnabledValidationFeatures = vkValidationFeatureEnableEXT;
+    vkCreateInfo.pNext = &vkValidationFeaturesEXT;
 
+    // Enable the validation layer
     const char* szLayerName = "VK_LAYER_KHRONOS_validation";
-    const char* pszExtensionNames[] = { "VK_EXT_validation_features", "VK_EXT_debug_utils" };
     vkCreateInfo.enabledLayerCount = 1;
     vkCreateInfo.ppEnabledLayerNames = &szLayerName;
-    vkCreateInfo.enabledExtensionCount = 2;
-    vkCreateInfo.ppEnabledExtensionNames = pszExtensionNames;
-    vkCreateInfo.pNext = &vkValidationFeaturesEXT;
+
+    // Add the validation extensions
+    instanceExtNames.push_back( "VK_EXT_validation_features" );
+    instanceExtNames.push_back( "VK_EXT_debug_utils" );
 #endif
+    vkCreateInfo.enabledExtensionCount = instanceExtNames.size( );
+    vkCreateInfo.ppEnabledExtensionNames = instanceExtNames.data( );
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult vkResult = vkCreateInstance( &vkCreateInfo, VK_NULL_HANDLE, &instance );
     if (vkResult == VK_SUCCESS){
+        // Load the extension
+        auto pVkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)(
+            vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceProperties2KHR" )
+        );
+
         // Count
         uint32_t vkPhysicalDeviceCount = 0;
         vkEnumeratePhysicalDevices( instance, &vkPhysicalDeviceCount, VK_NULL_HANDLE );
@@ -464,6 +480,47 @@ int vkSha256(int argc, const char* argv[]) {
             }
             std::cout << "Selected queue family #" << uQueueFamilyIdx << endl;
 
+            // Query for the extended physical properties
+            if (pVkGetPhysicalDeviceProperties2KHR){
+                VkPhysicalDeviceExternalMemoryHostPropertiesEXT vkPhysicalDeviceExternalMemoryHostProperties = {};
+                vkPhysicalDeviceExternalMemoryHostProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
+                VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2 = {};
+                vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceExternalMemoryHostProperties;
+                pVkGetPhysicalDeviceProperties2KHR( vkPhysicalDevice, &vkPhysicalDeviceProperties2 );
+                std::cout << "vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment == " << vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment << endl << endl;
+            }else{
+                std::cerr << "'vkGetPhysicalDeviceProperties2KHR' could not be resolved." << endl; 
+            }
+ 
+            // Enumerate the device extensions
+            std::vector<char*> deviceExtNames;
+            uint32_t uDeviceExtensionPropertyCount = 0;
+            vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, VK_NULL_HANDLE );
+            if (uDeviceExtensionPropertyCount > 0){
+                // Allocate and query
+                VkExtensionProperties* pVkExtensionProperties = new (std::nothrow) VkExtensionProperties[uDeviceExtensionPropertyCount];
+                if (pVkExtensionProperties){
+                    std::cout << "Extensions: ";
+                    vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, pVkExtensionProperties );
+                    for (decltype(uDeviceExtensionPropertyCount) u = 0; u < uDeviceExtensionPropertyCount; ++u){
+                        VkExtensionProperties* vkExtensionProperties = (pVkExtensionProperties + u);
+                        std::cout << vkExtensionProperties->extensionName << " ";
+
+                        if (strcmp( vkExtensionProperties->extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
+                            deviceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
+                            continue;
+                        }
+                        if (strcmp( vkExtensionProperties->extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
+                            deviceExtNames.push_back( VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
+                            continue;
+                        }
+                    }
+                    std::cout << endl;
+                    delete[] pVkExtensionProperties;
+                }
+            }
+
             // Create a logical device w/the selected queue
             const float queuePrioritory = 1.0f;
             VkDeviceQueueCreateInfo vkDeviceQueueCreateInfo = {};
@@ -475,6 +532,8 @@ int vkSha256(int argc, const char* argv[]) {
             vkDeviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
             vkDeviceCreateInfo.queueCreateInfoCount = 1;
             vkDeviceCreateInfo.pQueueCreateInfos = &vkDeviceQueueCreateInfo;
+            vkDeviceCreateInfo.enabledExtensionCount = deviceExtNames.size( );
+            vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtNames.data( );
             VkDevice vkDevice = VK_NULL_HANDLE;
             vkResult = vkCreateDevice( vkPhysicalDevice, &vkDeviceCreateInfo, VK_NULL_HANDLE, &vkDevice );
             if (vkResult != VK_SUCCESS){
@@ -880,7 +939,35 @@ int vkSha256(int argc, const char* argv[]) {
         return 0;
     }
 
-    cerr << "Failed to initialise Vulkan" << endl;
+
+    // Get the error name
+    char* initError = NULL;
+    switch (vkResult) {
+        case VK_ERROR_OUT_OF_HOST_MEMORY:
+            initError = "VK_ERROR_OUT_OF_HOST_MEMORY";
+            break;
+
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+            initError = "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+            break;
+
+        case VK_ERROR_LAYER_NOT_PRESENT:
+            initError = "VK_ERROR_LAYER_NOT_PRESENT";
+            break;
+
+        case VK_ERROR_EXTENSION_NOT_PRESENT:
+            initError = "VK_ERROR_EXTENSION_NOT_PRESENT";
+            break;
+
+        case VK_ERROR_INCOMPATIBLE_DRIVER:
+            initError = "VK_ERROR_INCOMPATIBLE_DRIVER";
+            break;
+
+        default:
+            initError = "(some other, unidentified error)";
+            break;       
+    }
+    cerr << "Failed to initialise Vulkan w/error: " << initError << endl;
 #else
     std::cerr << "Vulkan not supported!" << std::endl;
 #endif
