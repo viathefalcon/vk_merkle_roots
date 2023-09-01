@@ -28,6 +28,13 @@
 #include "Debug.h"
 #include "SHA-256vk.h"
 
+// Globals
+//
+
+// Vulkan Extension Function Pointers
+PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
+PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
+
 // Class(es)
 //
 #if defined (VULKAN_SUPPORT)
@@ -250,8 +257,6 @@ public:
         // Setup
         VkMemoryAllocation vkMemoryAllocation = {};
         vkMemoryAllocation.vkSize = 0;
-        VkPhysicalDeviceMemoryProperties vkPhysicalDeviceMemoryProperties;
-        vkGetPhysicalDeviceMemoryProperties( m_vkPhysicalDevice, &vkPhysicalDeviceMemoryProperties );
 
         // Scan the buffers to work out the required properties
         uint32_t uMemoryTypeFilter = 0;
@@ -269,16 +274,34 @@ public:
             vkMemoryAllocation.vkSize += vkOffset;
         }
 
-        // Scan for a memory to back our input and output buffers
-        uint32_t uMemoryTypeIdx = vkPhysicalDeviceMemoryProperties.memoryTypeCount;
-        for (decltype(uMemoryTypeIdx) j = 0; j < vkPhysicalDeviceMemoryProperties.memoryTypeCount; ++j){
-            VkMemoryType* vkMemoryType = (vkPhysicalDeviceMemoryProperties.memoryTypes + j);
+        // Now look for memory for it
+        VkPhysicalDeviceMemoryProperties2 vkPhysicalDeviceMemoryProperties2 = {};
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT vkPhysicalDeviceMemoryBudgetProperties = {};
+        if (g_pVkGetPhysicalDeviceMemoryProperties2KHR){
+            vkPhysicalDeviceMemoryBudgetProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+
+            vkPhysicalDeviceMemoryProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+            vkPhysicalDeviceMemoryProperties2.pNext = &vkPhysicalDeviceMemoryBudgetProperties;
+            g_pVkGetPhysicalDeviceMemoryProperties2KHR( m_vkPhysicalDevice, &vkPhysicalDeviceMemoryProperties2 );
+        }else{
+            // Fall back
+            vkGetPhysicalDeviceMemoryProperties( m_vkPhysicalDevice, &(vkPhysicalDeviceMemoryProperties2.memoryProperties) );
+        }
+        const auto pVkPhysicalDeviceMemoryProperties = &(vkPhysicalDeviceMemoryProperties2.memoryProperties);
+        uint32_t uMemoryTypeIdx = pVkPhysicalDeviceMemoryProperties->memoryTypeCount;
+        for (decltype(uMemoryTypeIdx) j = 0; j < pVkPhysicalDeviceMemoryProperties->memoryTypeCount; ++j){
+            VkMemoryType* vkMemoryType = (pVkPhysicalDeviceMemoryProperties->memoryTypes + j);
             if ((vkMemoryType->propertyFlags & m_vkMemoryPropertyFlags) != m_vkMemoryPropertyFlags){
                 continue;
             }
 
-            VkMemoryHeap* pvkMemoryHeap = (vkPhysicalDeviceMemoryProperties.memoryHeaps + vkMemoryType->heapIndex);
-            if (pvkMemoryHeap->size < vkMemoryAllocation.vkSize){
+            VkMemoryHeap* pvkMemoryHeap = (pVkPhysicalDeviceMemoryProperties->memoryHeaps + vkMemoryType->heapIndex);
+            auto budget = vkPhysicalDeviceMemoryBudgetProperties.heapBudget[vkMemoryType->heapIndex];
+            if (budget == 0){
+                // Fallback
+                budget = pvkMemoryHeap->size;     
+            }
+            if (budget < vkMemoryAllocation.vkSize){
                 continue;
             }
 
@@ -288,13 +311,13 @@ public:
             }
 
             uMemoryTypeIdx = j;
-            std::cout << "Allocating " << vkMemoryAllocation.vkSize << " from memory heap " << vkMemoryType->heapIndex << " of size " << pvkMemoryHeap->size << " (with flags " << pvkMemoryHeap->flags << ")" << std::endl;
+            std::cout << "Allocating " << vkMemoryAllocation.vkSize << " from memory heap " << vkMemoryType->heapIndex << " of (available) size " << budget << " (flags: " << pvkMemoryHeap->flags << ")" << std::endl;
             break;
         }
 
         // If we found one, then grab it
         VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
-        if (uMemoryTypeIdx < vkPhysicalDeviceMemoryProperties.memoryTypeCount){
+        if (uMemoryTypeIdx < pVkPhysicalDeviceMemoryProperties->memoryTypeCount){
             // Allocate
             VkMemoryAllocateInfo vkMemoryAllocateInfo = {};
             vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -422,8 +445,11 @@ int vkSha256(int argc, const char* argv[]) {
     VkResult vkResult = vkCreateInstance( &vkCreateInfo, VK_NULL_HANDLE, &instance );
     if (vkResult == VK_SUCCESS){
         // Load the extension
-        auto pVkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)(
+        g_pVkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)(
             vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceProperties2KHR" )
+        );
+        g_pVkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)(
+            vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceMemoryProperties2" )
         );
 
         // Count
@@ -481,13 +507,13 @@ int vkSha256(int argc, const char* argv[]) {
             std::cout << "Selected queue family #" << uQueueFamilyIdx << endl;
 
             // Query for the extended physical properties
-            if (pVkGetPhysicalDeviceProperties2KHR){
+            if (g_pVkGetPhysicalDeviceProperties2KHR){
                 VkPhysicalDeviceExternalMemoryHostPropertiesEXT vkPhysicalDeviceExternalMemoryHostProperties = {};
                 vkPhysicalDeviceExternalMemoryHostProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
                 VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2 = {};
                 vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
                 vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceExternalMemoryHostProperties;
-                pVkGetPhysicalDeviceProperties2KHR( vkPhysicalDevice, &vkPhysicalDeviceProperties2 );
+                g_pVkGetPhysicalDeviceProperties2KHR( vkPhysicalDevice, &vkPhysicalDeviceProperties2 );
                 std::cout << "vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment == " << vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment << endl << endl;
             }else{
                 std::cerr << "'vkGetPhysicalDeviceProperties2KHR' could not be resolved." << endl; 
@@ -505,14 +531,19 @@ int vkSha256(int argc, const char* argv[]) {
                     vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, pVkExtensionProperties );
                     for (decltype(uDeviceExtensionPropertyCount) u = 0; u < uDeviceExtensionPropertyCount; ++u){
                         VkExtensionProperties* vkExtensionProperties = (pVkExtensionProperties + u);
-                        std::cout << vkExtensionProperties->extensionName << " ";
+                        const char* extensionName = vkExtensionProperties->extensionName;
+                        std::cout << extensionName << " ";
 
-                        if (strcmp( vkExtensionProperties->extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
+                        if (strcmp( extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
                             deviceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
                             continue;
                         }
-                        if (strcmp( vkExtensionProperties->extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
+                        if (strcmp( extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
                             deviceExtNames.push_back( VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
+                            continue;
+                        }
+                        if (strcmp( extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0){
+                            deviceExtNames.push_back( VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
                             continue;
                         }
                     }
