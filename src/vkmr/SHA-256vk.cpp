@@ -26,6 +26,7 @@
 
 // Local Project Headers
 #include "Debug.h"
+#include "Devices.h"
 #include "SHA-256vk.h"
 
 // Globals
@@ -41,7 +42,6 @@ PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperti
 class VkBufferSet {
 private:
     VkDevice m_vkDevice;
-    uint32_t m_queueFamilyIndex;
     VkDeviceSize m_size;
     std::vector<VkBuffer> m_vkBuffers;
     std::vector<VkBufferUsageFlags> m_vkUsageFlags;
@@ -49,7 +49,6 @@ private:
     void reset() {
         m_vkUsageFlags.clear( );
         m_vkBuffers.clear( );
-        m_queueFamilyIndex = 0;
         m_size = 0U;
         m_vkDevice = VK_NULL_HANDLE;
     }
@@ -66,9 +65,8 @@ public:
         reset( );
     }
 
-    VkBufferSet(VkDevice vkDevice, uint32_t queueFamilyIndex, VkDeviceSize size, const std::vector<VkBufferUsageFlags>& vkUsageFlags) noexcept:
+    VkBufferSet(VkDevice vkDevice, VkDeviceSize size, const std::vector<VkBufferUsageFlags>& vkUsageFlags) noexcept:
         m_vkDevice( vkDevice ),
-        m_queueFamilyIndex( queueFamilyIndex ),
         m_size( size ),
         m_vkUsageFlags( vkUsageFlags ) {
 
@@ -77,8 +75,6 @@ public:
         vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         vkBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        vkBufferCreateInfo.queueFamilyIndexCount = 1;
-        vkBufferCreateInfo.pQueueFamilyIndices = &(m_queueFamilyIndex);
         vkBufferCreateInfo.size = size;
         for (VkBufferUsageFlags usage : m_vkUsageFlags){
             vkBufferCreateInfo.usage = usage;
@@ -96,14 +92,13 @@ public:
         }
     }
 
-    VkBufferSet(VkBufferSet&& pair) noexcept:
-        m_vkDevice( pair.m_vkDevice ),
-        m_queueFamilyIndex( pair.m_queueFamilyIndex ),
-        m_size( pair.m_size ),
-        m_vkBuffers( std::move( pair.m_vkBuffers ) ),
-        m_vkUsageFlags( std::move( pair.m_vkUsageFlags ) ) {
+    VkBufferSet(VkBufferSet&& set) noexcept:
+        m_vkDevice( set.m_vkDevice ),
+        m_size( set.m_size ),
+        m_vkBuffers( std::move( set.m_vkBuffers ) ),
+        m_vkUsageFlags( std::move( set.m_vkUsageFlags ) ) {
 
-        pair.reset( );
+        set.reset( );
     }
 
     // We don't want a copy constructor
@@ -113,17 +108,16 @@ public:
         release( );
     }
 
-    VkBufferSet& operator=(VkBufferSet&& pair) noexcept {
-        if (this != &pair){
+    VkBufferSet& operator=(VkBufferSet&& set) noexcept {
+        if (this != &set){
             release( );
 
-            m_vkDevice = pair.m_vkDevice;
-            m_queueFamilyIndex = pair.m_queueFamilyIndex;
-            m_size = pair.m_size;
-            m_vkBuffers = std::move( pair.m_vkBuffers );
-            m_vkUsageFlags = std::move( pair.m_vkUsageFlags );
+            m_vkDevice = set.m_vkDevice;
+            m_size = set.m_size;
+            m_vkBuffers = std::move( set.m_vkBuffers );
+            m_vkUsageFlags = std::move( set.m_vkUsageFlags );
 
-            pair.reset( );
+            set.reset( );
         }
         return (*this);
     }
@@ -480,7 +474,7 @@ int vkSha256(int argc, const char* argv[]) {
             vkGetPhysicalDeviceQueueFamilyProperties( vkPhysicalDevice, &vkQueueFamilyCount, vkQueueFamilyProperties );
             
             // Iterate
-            uint32_t uQueueFamilyIdx = vkQueueFamilyCount;
+            uint32_t queueCount = 0, queueFamily = vkQueueFamilyCount;
             for (decltype(vkQueueFamilyCount) j = 0; j < vkQueueFamilyCount; ++j){
                 VkQueueFamilyProperties*  vkQueueFamilyProps = (vkQueueFamilyProperties + j);
                 std::cout << "Queue family #" << j << " supports ";
@@ -489,7 +483,10 @@ int vkSha256(int argc, const char* argv[]) {
                 }
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_COMPUTE_BIT){
                     std::cout << "compute ";
-                    uQueueFamilyIdx = j;
+                    if (vkQueueFamilyProps->queueCount > queueCount){
+                        queueFamily = j;
+                        queueCount = vkQueueFamilyProps->queueCount;
+                    }
                 }
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_TRANSFER_BIT){
                     std::cout << "transfer ";
@@ -500,11 +497,11 @@ int vkSha256(int argc, const char* argv[]) {
             std::cout << endl;
 
             // Look for an early out
-            if (uQueueFamilyIdx >= vkQueueFamilyCount){
+            if (queueFamily >= vkQueueFamilyCount){
                 cerr << "Failed to find a compute queue; skipping this device." << endl;
                 continue;
             }
-            std::cout << "Selected queue family #" << uQueueFamilyIdx << endl;
+            std::cout << "Selected queue family #" << queueFamily << endl;
 
             // Query for the extended physical properties
             if (g_pVkGetPhysicalDeviceProperties2KHR){
@@ -518,67 +515,16 @@ int vkSha256(int argc, const char* argv[]) {
             }else{
                 std::cerr << "'vkGetPhysicalDeviceProperties2KHR' could not be resolved." << endl; 
             }
- 
-            // Enumerate the device extensions
-            std::vector<char*> deviceExtNames;
-            uint32_t uDeviceExtensionPropertyCount = 0;
-            vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, VK_NULL_HANDLE );
-            if (uDeviceExtensionPropertyCount > 0){
-                // Allocate and query
-                VkExtensionProperties* pVkExtensionProperties = new (std::nothrow) VkExtensionProperties[uDeviceExtensionPropertyCount];
-                if (pVkExtensionProperties){
-                    std::cout << "Extensions: ";
-                    vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, pVkExtensionProperties );
-                    for (decltype(uDeviceExtensionPropertyCount) u = 0; u < uDeviceExtensionPropertyCount; ++u){
-                        VkExtensionProperties* vkExtensionProperties = (pVkExtensionProperties + u);
-                        const char* extensionName = vkExtensionProperties->extensionName;
-                        std::cout << extensionName << " ";
 
-                        if (strcmp( extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
-                            deviceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
-                            continue;
-                        }
-                        if (strcmp( extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
-                            deviceExtNames.push_back( VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
-                            continue;
-                        }
-                        if (strcmp( extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0){
-                            deviceExtNames.push_back( VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
-                            continue;
-                        }
-                    }
-                    std::cout << endl;
-                    delete[] pVkExtensionProperties;
-                }
-            }
-
-            // Create a logical device w/the selected queue
-            const float queuePrioritory = 1.0f;
-            VkDeviceQueueCreateInfo vkDeviceQueueCreateInfo = {};
-            vkDeviceQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            vkDeviceQueueCreateInfo.queueFamilyIndex = uQueueFamilyIdx;
-            vkDeviceQueueCreateInfo.queueCount = 1;
-            vkDeviceQueueCreateInfo.pQueuePriorities = &queuePrioritory;
-            VkDeviceCreateInfo vkDeviceCreateInfo = {};
-            vkDeviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-            vkDeviceCreateInfo.queueCreateInfoCount = 1;
-            vkDeviceCreateInfo.pQueueCreateInfos = &vkDeviceQueueCreateInfo;
-            vkDeviceCreateInfo.enabledExtensionCount = deviceExtNames.size( );
-            vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtNames.data( );
-            VkDevice vkDevice = VK_NULL_HANDLE;
-            vkResult = vkCreateDevice( vkPhysicalDevice, &vkDeviceCreateInfo, VK_NULL_HANDLE, &vkDevice );
-            if (vkResult != VK_SUCCESS){
-                cerr << "Failed to create logical device on queue #" << uQueueFamilyIdx << endl;
-            }
+            // Create us a device
+            vkmr::Device device( vkPhysicalDevice, queueFamily, queueCount );
+            vkResult = static_cast<VkResult>( device );
 
             // Get a handle the queue
-            VkQueue vkQueue = VK_NULL_HANDLE;
-            if (vkResult == VK_SUCCESS){
-                vkGetDeviceQueue( vkDevice, uQueueFamilyIdx, 0, &vkQueue );
-                if (vkQueue == VK_NULL_HANDLE){
-                    cerr << "Failed to retrieve handle to device queue!" << endl;
-                    vkResult = VK_ERROR_UNKNOWN;
-                }
+            VkQueue vkQueue = device.Queue( 0 );
+            if (vkQueue == VK_NULL_HANDLE){
+                cerr << "Failed to retrieve handle to device queue!" << endl;
+                vkResult = VK_ERROR_UNKNOWN;
             }
 
             // Create the command pool
@@ -586,9 +532,9 @@ int vkSha256(int argc, const char* argv[]) {
             if (vkResult == VK_SUCCESS){
                 VkCommandPoolCreateInfo vkCommandPoolCreateInfo = {};
                 vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-                vkCommandPoolCreateInfo.queueFamilyIndex = uQueueFamilyIdx;
+                vkCommandPoolCreateInfo.queueFamilyIndex = queueFamily;
                 vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-                vkResult = vkCreateCommandPool( vkDevice, &vkCommandPoolCreateInfo, VK_NULL_HANDLE, &vkCommandPool );
+                vkResult = vkCreateCommandPool( *device, &vkCommandPoolCreateInfo, VK_NULL_HANDLE, &vkCommandPool );
             }
 
             // Allocate the command buffer
@@ -599,7 +545,7 @@ int vkSha256(int argc, const char* argv[]) {
                 vkCommandBufferAllocateInfo.commandPool = vkCommandPool;
                 vkCommandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 vkCommandBufferAllocateInfo.commandBufferCount = 1;
-                vkResult = vkAllocateCommandBuffers( vkDevice, &vkCommandBufferAllocateInfo, &vkCommandBuffer );
+                vkResult = vkAllocateCommandBuffers( *device, &vkCommandBufferAllocateInfo, &vkCommandBuffer );
             }
 
             // Create some buffers
@@ -607,12 +553,12 @@ int vkSha256(int argc, const char* argv[]) {
                 // Prep some allocators
                 VkMemoryAllocator vkHostMemoryAllocator(
                     vkPhysicalDevice,
-                    vkDevice,
+                    *device,
                     (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
                 );
                 VkMemoryAllocator vkDeviceMemoryAllocator(
                     vkPhysicalDevice,
-                    vkDevice,
+                    *device,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
                 );
 
@@ -627,13 +573,13 @@ int vkSha256(int argc, const char* argv[]) {
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VK_BUFFER_USAGE_TRANSFER_DST_BIT
                 };
-                VkBufferSet vkBufferSetResults( vkDevice, uQueueFamilyIdx, args.size( ) * sizeof( VkSha256Result ), vkOutputBuffersUsageFlags );
+                VkBufferSet vkBufferSetResults( *device, args.size( ) * sizeof( VkSha256Result ), vkOutputBuffersUsageFlags );
                 std::vector<VkBufferUsageFlags> vkInputBuffersUsageFlags = {
                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
                 };
-                VkBufferSet vkBufferSetInput( vkDevice, uQueueFamilyIdx, vkInputWords * sizeof( uint32_t ), vkInputBuffersUsageFlags );
-                VkBufferSet vkBufferSetMetadata( vkDevice, uQueueFamilyIdx, args.size( ) * sizeof( VkSha256Metadata ), vkInputBuffersUsageFlags );
+                VkBufferSet vkBufferSetInput( *device, vkInputWords * sizeof( uint32_t ), vkInputBuffersUsageFlags );
+                VkBufferSet vkBufferSetMetadata( *device, args.size( ) * sizeof( VkSha256Metadata ), vkInputBuffersUsageFlags );
                 vkResult = (vkBufferSetResults && vkBufferSetInput && vkBufferSetInput) ? VK_SUCCESS : VK_ERROR_UNKNOWN;
                 if (vkResult == VK_SUCCESS){
                     // Allocate memory for the host-accessible buffers
@@ -650,7 +596,7 @@ int vkSha256(int argc, const char* argv[]) {
 
                         // Map the memory into our address space
                         uint8_t* pMapped = VK_NULL_HANDLE;
-                        vkResult = vkMapMemory( vkDevice, vkDeviceMemory, 0, allocated.vkSize, 0, reinterpret_cast<void**>( &pMapped ) );
+                        vkResult = vkMapMemory( *device, vkDeviceMemory, 0, allocated.vkSize, 0, reinterpret_cast<void**>( &pMapped ) );
                         if (vkResult == VK_SUCCESS){
                             std::memset( pMapped, 0, allocated.vkSize );
                         }
@@ -659,12 +605,12 @@ int vkSha256(int argc, const char* argv[]) {
                         VkDeviceSize vkMemoryOffset = 0U;
                         if (vkResult == VK_SUCCESS){
                             VkMemoryRequirements vkMemoryRequirements = {};
-                            vkGetBufferMemoryRequirements( vkDevice, vkBufferResults, &vkMemoryRequirements );
+                            vkGetBufferMemoryRequirements( *device, vkBufferResults, &vkMemoryRequirements );
                             vkMemoryOffset += vkMemoryRequirements.size;
                         }
                         if (vkResult == VK_SUCCESS){
                             VkMemoryRequirements vkMemoryRequirements = {};
-                            vkGetBufferMemoryRequirements( vkDevice, vkBufferMetadata, &vkMemoryRequirements );
+                            vkGetBufferMemoryRequirements( *device, vkBufferMetadata, &vkMemoryRequirements );
                             vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
 
                             // Copy the sizes
@@ -684,7 +630,7 @@ int vkSha256(int argc, const char* argv[]) {
                         }
                         if (vkResult == VK_SUCCESS){
                             VkMemoryRequirements vkMemoryRequirements = {};
-                            vkGetBufferMemoryRequirements( vkDevice, vkBufferInputs, &vkMemoryRequirements );
+                            vkGetBufferMemoryRequirements( *device, vkBufferInputs, &vkMemoryRequirements );
                             vkMemoryOffset += (vkMemoryOffset % vkMemoryRequirements.alignment);
 
                             // Copy in the strings
@@ -695,7 +641,7 @@ int vkSha256(int argc, const char* argv[]) {
                             }
 
                             // Unmap
-                            vkUnmapMemory( vkDevice, vkDeviceMemory );
+                            vkUnmapMemory( *device, vkDeviceMemory );
                         }
                     }
                 }
@@ -733,7 +679,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
                         vkShaderModuleCreateInfo.codeSize = code.size( ) * sizeof( uint32_t );
                         vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( code.data( ) );
-                        vkResult = vkCreateShaderModule( vkDevice, &vkShaderModuleCreateInfo, VK_NULL_HANDLE, &vkShaderModule );
+                        vkResult = vkCreateShaderModule( *device, &vkShaderModuleCreateInfo, VK_NULL_HANDLE, &vkShaderModule );
                     }
 
                     // Create the layout of the descriptor set
@@ -757,7 +703,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
                         vkDescriptorSetLayoutCreateInfo.bindingCount = 3;
                         vkDescriptorSetLayoutCreateInfo.pBindings = vkDescriptorSetLayoutBindings;
-                        vkResult = vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, VK_NULL_HANDLE, &vkDescriptorSetLayout );
+                        vkResult = vkCreateDescriptorSetLayout( *device, &vkDescriptorSetLayoutCreateInfo, VK_NULL_HANDLE, &vkDescriptorSetLayout );
                     }
 
                     // Create the pipeline layout
@@ -767,7 +713,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
                         vkPipelineLayoutCreateInfo.setLayoutCount = 1;
                         vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout;
-                        vkResult = vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
+                        vkResult = vkCreatePipelineLayout( *device, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
                     }
 
                     // Initialise the compute pipeline
@@ -782,7 +728,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
                         vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
                         vkComputePipelineCreateInfo.layout = vkPipelineLayout;
-                        vkResult = vkCreateComputePipelines( vkDevice, 0, 1, &vkComputePipelineCreateInfo, VK_NULL_HANDLE, &vkPipeline );
+                        vkResult = vkCreateComputePipelines( *device, 0, 1, &vkComputePipelineCreateInfo, VK_NULL_HANDLE, &vkPipeline );
                     }
 
                     // Create the descriptor pool
@@ -797,7 +743,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkDescriptorPoolCreateInfo.maxSets = 1;
                         vkDescriptorPoolCreateInfo.poolSizeCount = 1;
                         vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
-                        vkResult = vkCreateDescriptorPool( vkDevice, &vkDescriptorPoolCreateInfo, VK_NULL_HANDLE, &vkDescriptorPool );
+                        vkResult = vkCreateDescriptorPool( *device, &vkDescriptorPoolCreateInfo, VK_NULL_HANDLE, &vkDescriptorPool );
                     }
 
                     // Allocate the descriptor set
@@ -808,7 +754,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkDescriptorSetAllocateInfo.descriptorPool = vkDescriptorPool;
                         vkDescriptorSetAllocateInfo.descriptorSetCount = 1;
                         vkDescriptorSetAllocateInfo.pSetLayouts = &vkDescriptorSetLayout;
-                        vkResult = vkAllocateDescriptorSets( vkDevice, &vkDescriptorSetAllocateInfo, &vkDescriptorSet );
+                        vkResult = vkAllocateDescriptorSets( *device, &vkDescriptorSetAllocateInfo, &vkDescriptorSet );
                     }
 
                     // Update the descriptor set
@@ -849,7 +795,7 @@ int vkSha256(int argc, const char* argv[]) {
                             vkWriteDescriptorSetMetadata,
                             vkWriteDescriptorSetResults
                         };
-                        vkUpdateDescriptorSets( vkDevice, 3, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
+                        vkUpdateDescriptorSets( *device, 3, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
                     }
 
                     // Wait for the command buffer to become available, if it hasn't already
@@ -877,7 +823,7 @@ int vkSha256(int argc, const char* argv[]) {
                     if (vkResult == VK_SUCCESS){
                         VkFenceCreateInfo vkFenceCreateInfo = {};
                         vkFenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-                        vkResult = vkCreateFence( vkDevice, &vkFenceCreateInfo, VK_NULL_HANDLE, &vkFence );
+                        vkResult = vkCreateFence( *device, &vkFenceCreateInfo, VK_NULL_HANDLE, &vkFence );
                     }
 
                     // Submit to the queue
@@ -889,7 +835,7 @@ int vkSha256(int argc, const char* argv[]) {
                         vkResult = vkQueueSubmit( vkQueue, 1, &vkSubmitInfo, vkFence );
                     }
                     if (vkResult == VK_SUCCESS){
-                        vkResult = vkWaitForFences( vkDevice, 1, &vkFence, true, uint64_t(-1) );
+                        vkResult = vkWaitForFences( *device, 1, &vkFence, true, uint64_t(-1) );
                     }
 
                     // Copy back the results from the GPU
@@ -931,36 +877,33 @@ int vkSha256(int argc, const char* argv[]) {
 
                     // Cleanup
                     if (vkFence){
-                        vkDestroyFence( vkDevice, vkFence, VK_NULL_HANDLE );
+                        vkDestroyFence( *device, vkFence, VK_NULL_HANDLE );
                     }
                     if (vkCommandBuffer){
-                        vkFreeCommandBuffers( vkDevice, vkCommandPool, 1, &vkCommandBuffer );
+                        vkFreeCommandBuffers( *device, vkCommandPool, 1, &vkCommandBuffer );
                     }
                     if (vkDescriptorSet){
-                        vkFreeDescriptorSets( vkDevice, vkDescriptorPool, 1, &vkDescriptorSet );
+                        vkFreeDescriptorSets( *device, vkDescriptorPool, 1, &vkDescriptorSet );
                     }
                     if (vkDescriptorPool){
-                        vkDestroyDescriptorPool( vkDevice, vkDescriptorPool, VK_NULL_HANDLE );
+                        vkDestroyDescriptorPool( *device, vkDescriptorPool, VK_NULL_HANDLE );
                     }
                     if (vkPipeline){
-                        vkDestroyPipeline( vkDevice, vkPipeline, VK_NULL_HANDLE );
+                        vkDestroyPipeline( *device, vkPipeline, VK_NULL_HANDLE );
                     }
                     if (vkPipelineLayout){
-                        vkDestroyPipelineLayout( vkDevice, vkPipelineLayout, VK_NULL_HANDLE );
+                        vkDestroyPipelineLayout( *device, vkPipelineLayout, VK_NULL_HANDLE );
                     }
                     if (vkDescriptorSetLayout){
-                        vkDestroyDescriptorSetLayout( vkDevice, vkDescriptorSetLayout, VK_NULL_HANDLE );
+                        vkDestroyDescriptorSetLayout( *device, vkDescriptorSetLayout, VK_NULL_HANDLE );
                     }
                     if (vkShaderModule){
-                        vkDestroyShaderModule( vkDevice, vkShaderModule, VK_NULL_HANDLE );
+                        vkDestroyShaderModule( *device, vkShaderModule, VK_NULL_HANDLE );
                     }
                 }
             }
             if (vkCommandPool){
-                vkDestroyCommandPool( vkDevice, vkCommandPool, VK_NULL_HANDLE );
-            }
-            if (vkDevice){
-                vkDestroyDevice( vkDevice, VK_NULL_HANDLE );
+                vkDestroyCommandPool( *device, vkCommandPool, VK_NULL_HANDLE );
             }
         }
 
