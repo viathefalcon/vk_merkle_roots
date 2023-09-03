@@ -413,8 +413,8 @@ int vkSha256(int argc, const char* argv[]) {
 
     // Tee up the initial set of instance-level extensions we want
     std::vector<char*> instanceExtNames;
-    instanceExtNames.push_back( VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
-    instanceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME );
+    instanceExtNames.push_back( (char*) VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
+    instanceExtNames.push_back( (char*) VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME );
 #if !defined(_ONDECK_)
     VkValidationFeatureEnableEXT vkValidationFeatureEnableEXT[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
     VkValidationFeaturesEXT vkValidationFeaturesEXT = {};
@@ -918,27 +918,27 @@ int vkSha256(int argc, const char* argv[]) {
     char* initError = NULL;
     switch (vkResult) {
         case VK_ERROR_OUT_OF_HOST_MEMORY:
-            initError = "VK_ERROR_OUT_OF_HOST_MEMORY";
+            initError = (char*) "VK_ERROR_OUT_OF_HOST_MEMORY";
             break;
 
         case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-            initError = "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+            initError = (char*) "VK_ERROR_OUT_OF_DEVICE_MEMORY";
             break;
 
         case VK_ERROR_LAYER_NOT_PRESENT:
-            initError = "VK_ERROR_LAYER_NOT_PRESENT";
+            initError = (char*) "VK_ERROR_LAYER_NOT_PRESENT";
             break;
 
         case VK_ERROR_EXTENSION_NOT_PRESENT:
-            initError = "VK_ERROR_EXTENSION_NOT_PRESENT";
+            initError = (char*) "VK_ERROR_EXTENSION_NOT_PRESENT";
             break;
 
         case VK_ERROR_INCOMPATIBLE_DRIVER:
-            initError = "VK_ERROR_INCOMPATIBLE_DRIVER";
+            initError = (char*) "VK_ERROR_INCOMPATIBLE_DRIVER";
             break;
 
         default:
-            initError = "(some other, unidentified error)";
+            initError = (char*) "(some other, unidentified error)";
             break;       
     }
     cerr << "Failed to initialise Vulkan w/error: " << initError << endl;

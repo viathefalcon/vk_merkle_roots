@@ -6,6 +6,7 @@
 
 // C++ Standard Library Headers
 #include <vector>
+#include <cstring>
 #include <iostream>
 
 // Local Project Headers
@@ -23,6 +24,7 @@ Device::Device(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFamily, uint32_t
     m_queueFamily( queueFamily ),
     m_queueCount( queueCount ) {
 
+    using ::std::strcmp;
     using ::std::vector;
     using ::std::cout;
     using ::std::endl;
@@ -43,15 +45,15 @@ Device::Device(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFamily, uint32_t
                 cout << extensionName << " ";
 
                 if (strcmp( extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
+                    deviceExtNames.push_back( (char*) VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
                     continue;
                 }
                 if (strcmp( extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
+                    deviceExtNames.push_back( (char*) VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
                     continue;
                 }
                 if (strcmp( extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
+                    deviceExtNames.push_back( (char*) VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
                     continue;
                 }
             }
