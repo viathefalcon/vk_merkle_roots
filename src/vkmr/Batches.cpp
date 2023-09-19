@@ -7,6 +7,7 @@
 // C++ Standard Library Headers
 #include <vector>
 #include <string>
+#include <cstring>
 #include <iostream>
 #include <algorithm>
 
@@ -281,7 +282,7 @@ VkResult OneTierBatch::Dispatch(VkQueue vkQueue) {
 
             // Get the output
             VkSha256Result result = {};
-            std::memcpy( &result, pResult, sizeof( VkSha256Result ) );
+            ::std::memcpy( &result, pResult, sizeof( VkSha256Result ) );
             pResult += sizeof( VkSha256Result );
 
             ::std::cout << "Vulkan:- " << str << " >> " << print_bytes_ex( result.data, SHA256_WC ).str( ) << std::endl;

@@ -116,6 +116,8 @@
                 "-I/home/deck/Workspaces/Libraries/Vulkan/x86_64/include",
                 "-L/home/deck/Workspaces/Libraries/Vulkan/x86_64/lib",
                 "-lvulkan",
+                "-g",
+                "-O0",
                 "-o",
                 "${workspaceFolder}/bin/vkmr.app"
             ],
