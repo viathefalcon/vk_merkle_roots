@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/vkmr.app",
-            "args": ["abc"],
+            "args": ["abc", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq1"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/bin",
             "environment": [],

@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstring>
 #include <iostream>
+#include <algorithm>
 
 // Local Project Headers
 #include "Debug.h"
@@ -139,24 +140,39 @@ VkResult CommandBuffer::BindDispatch(DescriptorSet& descriptorSet, uint32_t coun
     vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     m_vkResult = ::vkBeginCommandBuffer( m_vkCommandBuffer, &vkCommandBufferBeginInfo );
     if (m_vkResult == VK_SUCCESS){
+        ::vkCmdBindPipeline( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipeline );
+
         VkDescriptorSet descriptorSets[] = { *descriptorSet };
+        ::vkCmdBindDescriptorSets( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipelineLayout, 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
         // c.f. https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples#cpu-read-back-of-data-written-by-a-compute-shader
-        VkMemoryBarrier2KHR vkMemoryBarrier = {};
-        vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-        vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-        vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
-        vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
-        VkDependencyInfoKHR dependencyInfo = {};
-        dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependencyInfo.memoryBarrierCount = 1;
-        dependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+        // (These barriers may be redundant..?)
+        VkMemoryBarrier2KHR host2ShaderMemB = {};
+        host2ShaderMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        host2ShaderMemB.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
+        host2ShaderMemB.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT_KHR;
+        host2ShaderMemB.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+        host2ShaderMemB.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        VkDependencyInfoKHR host2ShaderDep = {};
+        host2ShaderDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        host2ShaderDep.memoryBarrierCount = 1;
+        host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
+        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &host2ShaderDep );
 
-        ::vkCmdBindPipeline( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipeline );
-        ::vkCmdBindDescriptorSets( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipelineLayout, 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
+        // Actually dispatch the shader invocations
         ::vkCmdDispatch( m_vkCommandBuffer, count, 1, 1 );
-        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &dependencyInfo );
+
+        VkMemoryBarrier2KHR shader2HostMemB = {};
+        shader2HostMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        shader2HostMemB.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+        shader2HostMemB.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+        shader2HostMemB.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
+        shader2HostMemB.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
+        VkDependencyInfoKHR shader2HostDep = {};
+        shader2HostDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        shader2HostDep.memoryBarrierCount = 1;
+        shader2HostDep.pMemoryBarriers = &shader2HostMemB;
+        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &shader2HostDep );
 
         m_vkResult = ::vkEndCommandBuffer( m_vkCommandBuffer );
     }

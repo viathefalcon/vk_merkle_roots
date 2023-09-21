@@ -64,13 +64,37 @@ private:
     } VkBufferDescriptors;
     VkBufferDescriptors GenerateBufferDescriptors(size_t len = 0) const {
 
-        const auto minStorageBufferOffsetAlignment = m_minStorageBufferOffsetAlignment;
-        const auto alignStorageBufferOffset = [minStorageBufferOffsetAlignment](VkDeviceSize vkSize) {
-            const auto delta = (vkSize % minStorageBufferOffsetAlignment);
-            if (delta == 0){
-                return vkSize;
+        const auto lcm = [](VkDeviceSize s1, VkDeviceSize s2) -> VkDeviceSize {
+            // Figure out the smaller of the two inputs
+            auto lhs = s1, rhs = s2;
+            if (s1 > s2){
+                lhs = s2;
+                rhs = s1;
             }
-            return vkSize + (minStorageBufferOffsetAlignment - delta);
+
+            // Loop until we find some multiple of the larger value that is
+            // disivible by the smaller value with no remainder
+            decltype(rhs) lcm = 0;
+            for (decltype(lhs) multiplier = 1; true; ++multiplier) {
+                const auto tmp = (rhs * multiplier);
+                if ((tmp % lhs) == 0){
+                    lcm = tmp;
+                    break;
+                }
+            }
+            return lcm;
+        };
+
+        // Adjusts the given offset to be aligned to the lowest common multiple
+        // of the minimum such offset for the underlying device and a given size
+        const auto minStorageBufferOffsetAlignment = m_minStorageBufferOffsetAlignment;
+        const auto alignStorageBufferOffset = [lcm, minStorageBufferOffsetAlignment](VkDeviceSize vkOffset, VkDeviceSize vkSize) -> VkDeviceSize {
+            const auto alignment = lcm( minStorageBufferOffsetAlignment, vkSize );
+            const auto delta = (vkOffset % alignment);
+            if (delta == 0){
+                return vkOffset;
+            }
+            return vkOffset + (alignment - delta);
         };
 
         VkSha256Metadata back = { 0 };
@@ -83,15 +107,15 @@ private:
         VkDescriptorBufferInfo vkDescriptorBufferInputs = {};
         vkDescriptorBufferInputs.buffer = m_vkBuffer;
         vkDescriptorBufferInputs.offset = 0;
-        vkDescriptorBufferInputs.range = ((back.start + OneTierBatch::WordCount( back.size ) + OneTierBatch::WordCount( len )) * sizeof( uint32_t ));
+        vkDescriptorBufferInputs.range = alignStorageBufferOffset( ((back.start + OneTierBatch::WordCount( back.size ) + OneTierBatch::WordCount( len )) * sizeof( uint32_t )), sizeof( uint ) );
         VkDescriptorBufferInfo vkDescriptorBufferMetadata = {};
         vkDescriptorBufferMetadata.buffer = m_vkBuffer;
-        vkDescriptorBufferMetadata.offset = alignStorageBufferOffset( vkDescriptorBufferInputs.range );
+        vkDescriptorBufferMetadata.offset = alignStorageBufferOffset( vkDescriptorBufferInputs.range, sizeof( VkSha256Metadata ) );
         vkDescriptorBufferMetadata.range = (sizeof( VkSha256Metadata ) * count);
         VkDescriptorBufferInfo vkDescriptorBufferResults = {};
         vkDescriptorBufferResults.buffer = m_vkBuffer;
-        vkDescriptorBufferResults.offset = alignStorageBufferOffset( vkDescriptorBufferInputs.range + vkDescriptorBufferMetadata.range );
-        vkDescriptorBufferResults.range = VK_WHOLE_SIZE;
+        vkDescriptorBufferResults.offset = alignStorageBufferOffset( (vkDescriptorBufferInputs.range + vkDescriptorBufferMetadata.range), sizeof( VkSha256Result ) );
+        vkDescriptorBufferResults.range = (sizeof( VkSha256Result ) * count);
 
         // Wrap up and return
         VkBufferDescriptors vkBufferInfos = { vkDescriptorBufferInputs, vkDescriptorBufferMetadata, vkDescriptorBufferResults };
@@ -131,6 +155,7 @@ OneTierBatch::OneTierBatch(const ComputeDevice& device, VkDeviceMemory vkDeviceM
         m_pData = nullptr;
         return;
     }
+    ::std::memset( m_pData, 0, vkSize ); // Apparently important on Steam Deck..?
 
     // Create a buffer
     VkBufferCreateInfo vkBufferCreateInfo = {};
@@ -392,6 +417,7 @@ static MemoryTypeBudgets FindMemoryTypes(
     VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
     VkResult vkResult = ::vkAllocateMemory( *device, &vkDeviceMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
     if (vkResult == VK_SUCCESS){
+        ::std::cout << "Allocated " << vkDeviceMemoryAllocateInfo.allocationSize << " of memory type " << deviceMemoryBudget.memoryTypeIndex << ::std::endl;
         // Now, if the allocate memory isn't host-mappable, then we need to try and allocate the same again
         // from system memory
         if ((deviceMemoryBudget.vkMemoryPropertyFlags & vkHostMemoryFlags) == vkHostMemoryFlags){
