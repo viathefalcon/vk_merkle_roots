@@ -33,6 +33,7 @@
 // Vulkan Extension Function Pointers
 PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
+PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 #endif // defined (VULKAN_SUPPORT)
 
 // Function(s)
@@ -105,6 +106,9 @@ int vkSha256(int argc, const char* argv[]) {
         );
         g_pVkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)(
             vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceMemoryProperties2" )
+        );
+        g_VkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2KHR)(
+            vkGetInstanceProcAddr( instance, "vkCmdPipelineBarrier2KHR" )
         );
 
         // Count

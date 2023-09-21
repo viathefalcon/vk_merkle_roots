@@ -16,6 +16,10 @@
 #include "Devices.h"
 
 #if defined (VULKAN_SUPPORT)
+// Externals
+//
+extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+
 namespace vkmr {
 
 // Classes
@@ -133,14 +137,28 @@ VkResult CommandBuffer::BindDispatch(DescriptorSet& descriptorSet, uint32_t coun
     VkCommandBufferBeginInfo vkCommandBufferBeginInfo = {};
     vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    m_vkResult = vkBeginCommandBuffer( m_vkCommandBuffer, &vkCommandBufferBeginInfo );
+    m_vkResult = ::vkBeginCommandBuffer( m_vkCommandBuffer, &vkCommandBufferBeginInfo );
     if (m_vkResult == VK_SUCCESS){
         VkDescriptorSet descriptorSets[] = { *descriptorSet };
 
-        vkCmdBindPipeline( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipeline );
-        vkCmdBindDescriptorSets( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipelineLayout, 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
-        vkCmdDispatch( m_vkCommandBuffer, count, 1, 1 );
-        m_vkResult = vkEndCommandBuffer( m_vkCommandBuffer );
+        // c.f. https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples#cpu-read-back-of-data-written-by-a-compute-shader
+        VkMemoryBarrier2KHR vkMemoryBarrier = {};
+        vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+        vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+        vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
+        vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
+        VkDependencyInfoKHR dependencyInfo = {};
+        dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dependencyInfo.memoryBarrierCount = 1;
+        dependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+
+        ::vkCmdBindPipeline( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipeline );
+        ::vkCmdBindDescriptorSets( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipelineLayout, 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
+        ::vkCmdDispatch( m_vkCommandBuffer, count, 1, 1 );
+        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &dependencyInfo );
+
+        m_vkResult = ::vkEndCommandBuffer( m_vkCommandBuffer );
     }
     return m_vkResult;
 }
@@ -189,28 +207,41 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
         // Allocate and query
         VkExtensionProperties* pVkExtensionProperties = new (std::nothrow) VkExtensionProperties[uDeviceExtensionPropertyCount];
         if (pVkExtensionProperties){
+            decltype(deviceExtNames) requestedExtNames = {
+                (char*) VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+                (char*) VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
+                (char*) VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
+                (char*) VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+            };
             vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, pVkExtensionProperties );
-            for (decltype(uDeviceExtensionPropertyCount) u = 0; u < uDeviceExtensionPropertyCount; ++u){
+            for (decltype(uDeviceExtensionPropertyCount) u = 0; (!requestedExtNames.empty( )) && (u < uDeviceExtensionPropertyCount); ++u){
                 VkExtensionProperties* vkExtensionProperties = (pVkExtensionProperties + u);
                 const char* extensionName = vkExtensionProperties->extensionName;
 
-                if (strcmp( extensionName, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( (char*) VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME );
+                const auto end = requestedExtNames.end( );
+                auto it = ::std::find_if( requestedExtNames.begin( ), end, [=](const decltype(deviceExtNames)::value_type& value) {
+                    return (strcmp( value, extensionName ) == 0);
+                } );
+                if (it == end){
                     continue;
                 }
-                if (strcmp( extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( (char*) VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME );
-                    continue;
-                }
-                if (strcmp( extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0){
-                    deviceExtNames.push_back( (char*) VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
-                    continue;
-                }
+                deviceExtNames.push_back( *it );
+                requestedExtNames.erase( it );
             }
             delete[] pVkExtensionProperties;
         }
     }
+    ::std::cout << "Going to create a device with these extensions: ";
+    for (auto it = deviceExtNames.cbegin( ), end = deviceExtNames.cend( ); it != end; ++it){
+        ::std::cout << (*it) << " ";
+    }
+    ::std::cout << endl;
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+
+    // Enable the synchronization2 feature
+    VkPhysicalDeviceSynchronization2Features vkPhysicalDeviceSynchronization2Features = {};
+    vkPhysicalDeviceSynchronization2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    vkPhysicalDeviceSynchronization2Features.synchronization2 = VK_TRUE;
 
     // Try and create the device along w/all the queues..
     vector<float> queuePriorities(queueCount, 1.0f);
@@ -221,10 +252,13 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
     vkDeviceQueueCreateInfo.pQueuePriorities = queuePriorities.data( );
     VkDeviceCreateInfo vkDeviceCreateInfo = {};
     vkDeviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    vkDeviceCreateInfo.pNext = &vkPhysicalDeviceSynchronization2Features;
     vkDeviceCreateInfo.queueCreateInfoCount = 1;
     vkDeviceCreateInfo.pQueueCreateInfos = &vkDeviceQueueCreateInfo;
-    vkDeviceCreateInfo.enabledExtensionCount = deviceExtNames.size( );
-    vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtNames.data( );
+    if (!deviceExtNames.empty( )){
+        vkDeviceCreateInfo.enabledExtensionCount = deviceExtNames.size( );
+        vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtNames.data( );
+    }
     m_vkResult = ::vkCreateDevice( vkPhysicalDevice, &vkDeviceCreateInfo, pAllocator, &m_vkDevice );
     if (m_vkResult == VK_SUCCESS){
         // Create the shader module
