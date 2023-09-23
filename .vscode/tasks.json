@@ -136,6 +136,26 @@
         },
         {
             "type": "cppbuild",
+            "label": "(Mac) Build Streamer",
+            "command": "g++",
+            "args": [
+                "-std=c++11",
+                "src/strm/*.cpp",
+                "-D_MACOS_64_",
+                "-o",
+                "${workspaceFolder}/bin/strm.app"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "dependsOn": ["Make Build Dir"]
+        },,
+        {
+            "type": "cppbuild",
             "label": "(Mac) Build",
             "command": "g++",
             "args": [
@@ -152,7 +172,7 @@
                 "$gcc"
             ],
             "group": "build",
-            "dependsOn": ["Make Build Dir"]
+            "dependsOn": ["(Mac) Build Streamer"]
         },
     ],
     "version": "2.0.0"
