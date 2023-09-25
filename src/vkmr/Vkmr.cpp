@@ -17,6 +17,7 @@
 // C++ Standard Headers
 #include <iostream>
 #include <fstream>
+#include <cstring>
 #include <vector>
 #include <string>
 
@@ -33,7 +34,8 @@ std::string get(void) {
 
     // Read in the length
     uint32_t length = 0;
-    size_t counter = 0;
+    std::vector<unsigned char> buffer;
+    buffer.reserve( sizeof( length ) );
     do {
         const auto input = getchar( );
         if (input == EOF){
@@ -41,21 +43,17 @@ std::string get(void) {
         }
 
         // Accumulate
-        const auto byte = static_cast<unsigned char>( input );
-        memcpy( reinterpret_cast<unsigned char*>( &length ) + counter, &byte, sizeof( byte ) );
-
-        // Advance
-        counter++;
-    } while (counter < sizeof( length ));
-    if (counter < sizeof( length )){
+        buffer.push_back( static_cast<unsigned char>( input ) );
+    } while (buffer.size( ) < sizeof( length ));
+    if (buffer.size( ) < sizeof( length )){
         // Bail
         return "";
     }
+    std::memcpy( &length, buffer.data( ), sizeof( length ) );
 
     // Read in the string itself
     std::string str;
     str.reserve( static_cast<size_t>( length ) );
-    counter = 0;
     do {
         const auto input = getchar( );
         if (input == EOF){
@@ -64,7 +62,7 @@ std::string get(void) {
 
         // Accumulate
         str.append( 1, static_cast<char>( input ) );
-    } while (counter < static_cast<decltype(counter)>( length ));
+    } while (str.size( ) < static_cast<decltype(str)::size_type>( length ));
     return str;
 }
 
@@ -93,7 +91,7 @@ int main(int argc, const char* argv[]) {
 #else
     for (int i = 1; i < argc; ++i) {
         const auto arg = std::string( argv[i] );
-        const auto hashed = cpu_sha256( arg );
+        const auto hashed = vkmr::cpu_sha256( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
     }
 #endif
