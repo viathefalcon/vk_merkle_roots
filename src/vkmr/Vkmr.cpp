@@ -1,4 +1,4 @@
-// Main.cpp: defines the entry point for the application
+// Vkmr.cpp: defines the entry point for the application
 //
 
 // Macros
@@ -53,7 +53,8 @@ std::string get(void) {
     }
 
     // Read in the string itself
-    char* buffer = new (std::nothrow) char[length + 1];
+    std::string str;
+    str.reserve( static_cast<size_t>( length ) );
     counter = 0;
     do {
         const auto input = getchar( );
@@ -62,33 +63,38 @@ std::string get(void) {
         }
 
         // Accumulate
-        *(buffer + (counter++)) = static_cast<char>( input );
+        str.append( 1, static_cast<char>( input ) );
     } while (counter < static_cast<decltype(counter)>( length ));
-
-    // Return
-    std::string str( buffer, counter );
-    delete[] buffer;
     return str;
 }
 
 // Gives the entry-point for the application
 int main(int argc, const char* argv[]) {
 
+    using std::cout;
+    using std::endl;
+
     int result = 0;
 #if defined (_MACOS_64_)
+    vkmr::CpuSha256D mrc;
     while (true) {
         const auto arg = get( );
         if (arg.empty( )){
             break;
         }
-        const auto hashed = cpu_sha256( arg );
-        std::cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
+        const auto hashed = vkmr::cpu_sha256( arg );
+        cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
+
+        if (!mrc.Add( std::move( arg ) )){
+            break;
+        }
     }
+    cout << "Root => " << print_bytes( mrc.Run( ) ).str( ) << endl;
 #else
     for (int i = 1; i < argc; ++i) {
         const auto arg = std::string( argv[i] );
         const auto hashed = cpu_sha256( arg );
-        std::cout << arg << " >> " << print_bytes( hashed ).str( ) << std::endl;
+        cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
     }
 #endif
 

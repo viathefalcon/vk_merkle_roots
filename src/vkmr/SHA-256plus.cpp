@@ -222,7 +222,7 @@ static std::vector<uint32_t> cpu_sha256_n(const std::string& s) {
 				}
 			}
 		}
-		debug_print_bits_and_bytes( M, words );
+		// debug_print_bits_and_bytes( M, words );
 
 		// Initialise the working variables
 		uint32_t a = H[0];
@@ -466,7 +466,9 @@ static std::string hash_to_string(const std::vector<uint32_t>& v) {
 	return result;
 }
 
-std::string cpu_sha256(const std::string& s) {
+namespace vkmr {
+
+::std::string cpu_sha256(const ::std::string& s) {
 	return hash_to_string(
 		cpu_sha256_n( s )
 	);
@@ -474,17 +476,25 @@ std::string cpu_sha256(const std::string& s) {
 
 #define cpu_sha256d_int(s) cpu_sha256_1( cpu_sha256_n( s ) )
 
-std::string cpu_sha256d(const std::string& s) {
+::std::string cpu_sha256d(const ::std::string& s) {
 
 	return hash_to_string(
 		cpu_sha256d_int( s )
 	);
 }
 
-std::string cpu_merkle_root_sha256d(const std::vector<std::string>& args) {
+// Classes
+//
 
-	auto be_to_string = [=](const std::vector<uint32_t>& be) -> std::string {
-		std::string result;
+CpuSha256D::out_type CpuSha256D::Run(void) const {
+
+	// Look for an early out
+	if (m_args.empty( )){
+		return "";
+	}
+
+	auto be_to_string = [=](const ::std::vector<uint32_t>& be) -> ::std::string {
+		::std::string result;
 		for (auto it = be.cbegin( ), end = be.cend( ); it != end; ++it){
 			const auto u = *it;
 			for (uint32_t k = 0; k < sizeof( uint32_t ); ++k){
@@ -495,9 +505,9 @@ std::string cpu_merkle_root_sha256d(const std::vector<std::string>& args) {
 		return result;
 	};
 
-	std::vector<std::vector<uint32_t>> u, v;
-	u.reserve( args.size( ) );
-	std::for_each( args.cbegin( ), args.cend( ), [&u, &be_to_string](const std::string& arg) {
+	::std::vector<::std::vector<uint32_t>> u, v;
+	u.reserve( m_args.size( ) );
+	::std::for_each( m_args.cbegin( ), m_args.cend( ), [&u, &be_to_string](const ::std::string& arg) {
 		const auto H = cpu_sha256d_int( arg );
 
 		/*
@@ -532,7 +542,7 @@ std::string cpu_merkle_root_sha256d(const std::vector<std::string>& args) {
 			pout->push_back( h );
 
 			/*
-			std::ostringstream oss;
+			::std::ostringstream oss;
 			oss << "(" << pairs << "/" << count << "): ";
 			debug_print_label( oss.str( ) );
 			debug_print_bytes( be_to_string( h ) );
@@ -545,8 +555,12 @@ std::string cpu_merkle_root_sha256d(const std::vector<std::string>& args) {
 		pout = tmp;
 	} while (pin->size( ) > 1);
 
+	/*
 	debug_print_label( "B/E: " );
 	debug_print_bytes( be_to_string( pin->front( ) ) );
+	*/
 
 	return hash_to_string( pin->front( ) );
 }
+
+} // namespace vkmr
