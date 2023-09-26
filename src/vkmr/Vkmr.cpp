@@ -80,7 +80,7 @@ int main(int argc, const char* argv[]) {
         if (arg.empty( )){
             break;
         }
-        const auto hashed = vkmr::cpu_sha256( arg );
+        const auto hashed = vkmr::cpu_sha256d( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
 
         if (!mrc.Add( std::move( arg ) )){
@@ -91,7 +91,7 @@ int main(int argc, const char* argv[]) {
 #else
     for (int i = 1; i < argc; ++i) {
         const auto arg = std::string( argv[i] );
-        const auto hashed = vkmr::cpu_sha256( arg );
+        const auto hashed = vkmr::cpu_sha256d( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
     }
 #endif

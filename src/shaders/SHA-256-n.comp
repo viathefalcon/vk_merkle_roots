@@ -62,8 +62,75 @@ const uint c_constants[] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf,
                              0x90befffa, 0xa4506ceb, 0xbef9a3f7,
                              0xc67178f2 };
 
+const uint Hinitial[] = {
+    0x6a09e667,
+    0xbb67ae85,
+    0x3c6ef372,
+    0xa54ff53a,
+    0x510e527f,
+    0x9b05688c,
+    0x1f83d9ab,
+    0x5be0cd19
+};
+
 // Functions
 //
+
+void sha256_be_1(inout uint arg[8]) {
+
+	// Initialise the message
+	uint M[SHA256_MESSAGE_BLOCK_WC];
+	for (uint w = 0; w < 8; ++w){
+		M[w] = arg[w];
+	}
+	for (uint w = 8; w < SHA256_MESSAGE_BLOCK_WC; ++w){
+		M[w] = 0U;
+	}
+	M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
+	M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
+
+	// Initialise the working variables
+	uint a = Hinitial[0];
+	uint b = Hinitial[1];
+	uint c = Hinitial[2];
+	uint d = Hinitial[3];
+	uint e = Hinitial[4];
+	uint f = Hinitial[5];
+	uint g = Hinitial[6];
+	uint h = Hinitial[7];
+
+	// Loop
+	uint W[64];
+	for (uint t = 0; t < 64; ++t){
+		// Prep the message schedule
+		if (t < SHA256_MESSAGE_BLOCK_WC){
+			W[t] = M[t];
+		}else{
+			W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
+		}
+
+		uint T1 = h + Sigma1( e ) + Ch( e, f, g ) + c_constants[t] + W[t];
+		uint T2 = Sigma0( a ) + Maj( a, b, c );
+		h = g;
+		g = f;
+		f = e;
+		e = d + T1;
+		d = c;
+		c = b;
+		b = a;
+		a = T1 + T2;
+	}
+
+	// Accumulate the result
+	arg[0] = a + Hinitial[0];
+	arg[1] = b + Hinitial[1];
+	arg[2] = c + Hinitial[2];
+	arg[3] = d + Hinitial[3];
+	arg[4] = e + Hinitial[4];
+	arg[5] = f + Hinitial[5];
+	arg[6] = g + Hinitial[6];
+	arg[7] = h + Hinitial[7];
+}
 
 void main() {
 	// Get the inputs
@@ -72,16 +139,7 @@ void main() {
 	const uint start = metadata[gid].start;
 
 	// Set the initial hash value(s)
-	uint H[] = {
-		0x6a09e667,
-		0xbb67ae85,
-		0x3c6ef372,
-		0xa54ff53a,
-		0x510e527f,
-		0x9b05688c,
-		0x1f83d9ab,
-		0x5be0cd19
-	};
+	uint H[] = Hinitial;
 
 	// Get 'N', the number of blocks
 	uint N = (size / SHA256_MESSAGE_BLOCK_BYTE_SIZE);
@@ -97,7 +155,6 @@ void main() {
 	}
 
 	// Process each block
-	const uint wc = SHA256_MESSAGE_BLOCK_WC;
 	for (uint i = 0; i < N; ++i){
 		// Initialise an empty block
 		uint M[SHA256_MESSAGE_BLOCK_WC];
@@ -120,7 +177,7 @@ void main() {
 			const uint next = (offset + SHA256_MESSAGE_BLOCK_BYTE_SIZE);
 			if (next < size){
 				// Fill the message with the bytes in the current block
-				for (uint w = 0; w < wc; ++w, ++p){
+				for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w, ++p){
 					M[w] = data[p];
 				}
 			}else{
@@ -177,7 +234,7 @@ void main() {
 		uint W[64];
 		for (uint t = 0; t < 64; ++t){
 			// Prep the message schedule
-			if (t < wc){
+			if (t < SHA256_MESSAGE_BLOCK_WC){
 				W[t] = SWOP_ENDS_U32( M[t] );
 			}else{
 				W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
@@ -205,6 +262,9 @@ void main() {
 		H[6] = g + H[6];
 		H[7] = h + H[7];
 	}
+
+	// Apply the second round of hashing
+	sha256_be_1( H );
 
 	// Output the result
 	for (uint s = 0; s < SHA256_WC; ++s){
