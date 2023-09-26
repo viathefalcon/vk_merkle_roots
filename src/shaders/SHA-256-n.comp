@@ -14,9 +14,13 @@
 // Macros
 //
 
+// We're just sort of, well, assuming little endianness..
 #define GET_U32_BE(x) SWOP_ENDS_U32(x)
 
 #define UINT_BYTE_SIZE					4
+
+#define Ch3(v) Ch((v).x, (v).y, (v).z)
+#define Maj3(v) Maj((v).x, (v).y, (v).z)
 
 // Layouts
 //
@@ -62,42 +66,33 @@ const uint c_constants[] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf,
                              0x90befffa, 0xa4506ceb, 0xbef9a3f7,
                              0xc67178f2 };
 
-const uint Hinitial[] = {
-    0x6a09e667,
-    0xbb67ae85,
-    0x3c6ef372,
-    0xa54ff53a,
-    0x510e527f,
-    0x9b05688c,
-    0x1f83d9ab,
-    0x5be0cd19
-};
+const uvec4 Hinitial1 = uvec4( 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a );
+const uvec4 Hinitial2 = uvec4( 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 );
 
 // Functions
 //
 
-void sha256_be_1(inout uint arg[8]) {
+// Computes the SHA-256 hash of the given 256-bit Big Endian input
+void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
 
 	// Initialise the message
 	uint M[SHA256_MESSAGE_BLOCK_WC];
-	for (uint w = 0; w < 8; ++w){
-		M[w] = arg[w];
+	uint w = 0;
+	for ( ; w < 4; ++w){
+		M[w] = arg1[w];
 	}
-	for (uint w = 8; w < SHA256_MESSAGE_BLOCK_WC; ++w){
+	for (uint x = 0; w < 8; ++w, ++x){
+		M[w] = arg2[x];
+	}
+	for (; w < (SHA256_MESSAGE_BLOCK_WC - 1); ++w){
 		M[w] = 0U;
 	}
 	M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
 	M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
 
 	// Initialise the working variables
-	uint a = Hinitial[0];
-	uint b = Hinitial[1];
-	uint c = Hinitial[2];
-	uint d = Hinitial[3];
-	uint e = Hinitial[4];
-	uint f = Hinitial[5];
-	uint g = Hinitial[6];
-	uint h = Hinitial[7];
+	uvec4 h1 = Hinitial1;
+	uvec4 h2 = Hinitial2;
 
 	// Loop
 	uint W[64];
@@ -108,38 +103,27 @@ void sha256_be_1(inout uint arg[8]) {
 		}else{
 			W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
 		}
+		const uint T1 = h2.w + Sigma1( h2.x ) + Ch3( h2 ) + c_constants[t] + W[t];
+		const uint T2 = Sigma0( h1.x ) + Maj3( h1 );
 
-		uint T1 = h + Sigma1( e ) + Ch( e, f, g ) + c_constants[t] + W[t];
-		uint T2 = Sigma0( a ) + Maj( a, b, c );
-		h = g;
-		g = f;
-		f = e;
-		e = d + T1;
-		d = c;
-		c = b;
-		b = a;
-		a = T1 + T2;
+		h2 = h2.xxyz;
+		h2.x = h1.w + T1;
+
+		h1 = h1.xxyz;
+		h1.x = T1 + T2;
 	}
 
 	// Accumulate the result
-	arg[0] = a + Hinitial[0];
-	arg[1] = b + Hinitial[1];
-	arg[2] = c + Hinitial[2];
-	arg[3] = d + Hinitial[3];
-	arg[4] = e + Hinitial[4];
-	arg[5] = f + Hinitial[5];
-	arg[6] = g + Hinitial[6];
-	arg[7] = h + Hinitial[7];
+	arg1 = Hinitial1 + h1;
+	arg2 = Hinitial2 + h2;
 }
 
+#ifdef _SHA_256_N_
 void main() {
 	// Get the inputs
 	const uint gid = gl_GlobalInvocationID.x;
 	const uint size = metadata[gid].size;
 	const uint start = metadata[gid].start;
-
-	// Set the initial hash value(s)
-	uint H[] = Hinitial;
 
 	// Get 'N', the number of blocks
 	uint N = (size / SHA256_MESSAGE_BLOCK_BYTE_SIZE);
@@ -153,6 +137,10 @@ void main() {
 	if (delta <= 8){
 		N++;
 	}
+
+	// Set the initial hash values
+	uvec4 H1 = Hinitial1;
+	uvec4 H2 = Hinitial2;
 
 	// Process each block
 	for (uint i = 0; i < N; ++i){
@@ -221,14 +209,8 @@ void main() {
 		}
 
 		// Initialise the working variables
-		uint a = H[0];
-		uint b = H[1];
-		uint c = H[2];
-		uint d = H[3];
-		uint e = H[4];
-		uint f = H[5];
-		uint g = H[6];
-		uint h = H[7];
+		uvec4 h1 = H1;
+		uvec4 h2 = H2;
 
 		// Loop
 		uint W[64];
@@ -239,38 +221,38 @@ void main() {
 			}else{
 				W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
 			}
+			const uint T1 = h2.w + Sigma1( h2.x ) + Ch3( h2 ) + c_constants[t] + W[t];
+			const uint T2 = Sigma0( h1.x ) + Maj3( h1 );
 
-			uint T1 = h + Sigma1( e ) + Ch( e, f, g ) + c_constants[t] + W[t];
-			uint T2 = Sigma0( a ) + Maj( a, b, c );
-			h = g;
-			g = f;
-			f = e;
-			e = d + T1;
-			d = c;
-			c = b;
-			b = a;
-			a = T1 + T2;
+			h2 = h2.xxyz;
+			h2.x = h1.w + T1;
+
+			h1 = h1.xxyz;
+			h1.x = T1 + T2;
 		}
 
 		// Compute the i-th intermediate hash value
-		H[0] = a + H[0];
-		H[1] = b + H[1];
-		H[2] = c + H[2];
-		H[3] = d + H[3];
-		H[4] = e + H[4];
-		H[5] = f + H[5];
-		H[6] = g + H[6];
-		H[7] = h + H[7];
+		H1 += h1;
+		H2 += h2;
 	}
 
 	// Apply the second round of hashing
-	sha256_be_1( H );
+	sha256_be_1( H1, H2 );
 
 	// Output the result
-	for (uint s = 0; s < SHA256_WC; ++s){
-		const uint v = H[s];
+	const uint wc = (SHA256_WC / 2);
+	uint s = 0;
+	for ( ; s < wc; ++s){
+		const uint v = H1[s];
+
+		// The output of the algorithm is big-endian in nature
+		result[gid].data[s] = SWOP_ENDS_U32( v );
+	}
+	for (uint r = 0; r < wc; ++r, ++s){
+		const uint v = H2[r];
 
 		// The output of the algorithm is big-endian in nature
 		result[gid].data[s] = SWOP_ENDS_U32( v );
 	}
 }
+#endif // _SHA_256_N_

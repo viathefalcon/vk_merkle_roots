@@ -7,6 +7,7 @@
             "args": [
                 "${workspaceFolder}\\src\\shaders\\SHA-256-n.comp",
                 "--target-env=vulkan1.2",
+                "-D_SHA_256_N_",
                 "-g",
                 "-o",
                 "${workspaceFolder}\\bin\\SHA-256-n.spv"
@@ -64,6 +65,7 @@
             "args": [
                 "${workspaceFolder}/src/shaders/SHA-256-n.comp",
                 "--target-env=vulkan1.2",
+                "-D_SHA_256_N_",
                 "-o",
                 "${workspaceFolder}/bin/SHA-256-n.spv"
             ],
