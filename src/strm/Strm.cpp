@@ -11,6 +11,13 @@
 // C++ Standard Library Headers
 #include <cstring>
 
+// Other headers
+#ifdef _WIN32
+#include <winsock.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 // Functions
 //
 
@@ -24,8 +31,13 @@ int main(int argc, const char* argv[]) {
         const auto len = std::strlen( arg );
 
         // Write out as a 32-bit unsigned int
-        const auto output = static_cast<unsigned int>( len );
-        fwrite( &output, sizeof( output ), 1, stdout );
+        // (in network-order)
+        const size_t nitems = 1;
+        const auto output = htonl( static_cast<u_long>( len ) );
+        if (fwrite( &output, sizeof( output ), nitems, stdout ) < nitems){
+            // Bail
+            return 1;
+        }
 
         // Write out the characters
         fwrite( arg, sizeof( char ), len, stdout );

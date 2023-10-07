@@ -21,6 +21,13 @@
 #include <vector>
 #include <string>
 
+// Other headers
+#ifdef _WIN32
+#include <winsock.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 // Local Project Headers
 #include "Debug.h"
 #include "SHA-256vk.h"
@@ -33,9 +40,9 @@
 std::string get(void) {
 
     // Read in the length
-    uint32_t length = 0;
+    u_long netlong = 0;
     std::vector<unsigned char> buffer;
-    buffer.reserve( sizeof( length ) );
+    buffer.reserve( sizeof( netlong ) );
     do {
         const auto input = getchar( );
         if (input == EOF){
@@ -44,12 +51,16 @@ std::string get(void) {
 
         // Accumulate
         buffer.push_back( static_cast<unsigned char>( input ) );
-    } while (buffer.size( ) < sizeof( length ));
-    if (buffer.size( ) < sizeof( length )){
+    } while (buffer.size( ) < sizeof( netlong ));
+    if (buffer.size( ) < sizeof( netlong )){
         // Bail
         return "";
     }
-    std::memcpy( &length, buffer.data( ), sizeof( length ) );
+
+    // Get the bytes into the variable, and then convert
+    // from network order
+    std::memcpy( &netlong, buffer.data( ), sizeof( netlong ) );
+    const auto length = static_cast<uint32_t>( ntohl( netlong ) );
 
     // Read in the string itself
     std::string str;
