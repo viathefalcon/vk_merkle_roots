@@ -22,7 +22,7 @@
 #include <string>
 
 // Other headers
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <winsock.h>
 #else
 #include <arpa/inet.h>
@@ -40,7 +40,11 @@
 std::string get(void) {
 
     // Read in the length
+#if defined(_WIN32)
     u_long netlong = 0;
+#else
+    socklen_t netlong = 0;
+#endif
     std::vector<unsigned char> buffer;
     buffer.reserve( sizeof( netlong ) );
     do {

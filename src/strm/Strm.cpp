@@ -12,10 +12,12 @@
 #include <cstring>
 
 // Other headers
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <winsock.h>
+typedef u_long netlong_t;
 #else
 #include <arpa/inet.h>
+typedef socklen_t netlong_t;
 #endif
 
 // Functions
@@ -33,7 +35,7 @@ int main(int argc, const char* argv[]) {
         // Write out as a 32-bit unsigned int
         // (in network-order)
         const size_t nitems = 1;
-        const auto output = htonl( static_cast<u_long>( len ) );
+        const auto output = htonl( static_cast<netlong_t>( len ) );
         if (fwrite( &output, sizeof( output ), nitems, stdout ) < nitems){
             // Bail
             return 1;
