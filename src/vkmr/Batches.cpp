@@ -4,6 +4,9 @@
 // Includes
 //
 
+// C++ Standard Library Headers
+#include <cstring>
+
 // Local Project Headers
 #include "Debug.h"
 

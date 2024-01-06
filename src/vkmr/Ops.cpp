@@ -5,6 +5,7 @@
 //
 
 // C++ Standard Library Headers
+#include <cstring>
 #include <iostream>
 #include <fstream>
 

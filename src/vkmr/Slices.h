@@ -149,7 +149,7 @@ public:
         VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
         vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
         vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceMaintenance3Properties;
-        g_pVkGetPhysicalDeviceProperties2KHR( device.PhysicalDevice( ), &vkPhysicalDeviceProperties2 );
+        device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
 
         // The size of a slice is the smaller of:
         // 1. the most we can use (in one whack)

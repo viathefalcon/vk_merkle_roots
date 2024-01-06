@@ -22,6 +22,7 @@
 
 // Vulkan Extension Function Pointers
 extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 extern PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
 
 namespace vkmr {
@@ -391,6 +392,10 @@ VkMemoryRequirements ComputeDevice::StorageBufferRequirements(VkDeviceSize vkSiz
         ::vkDestroyBuffer( m_vkDevice, vkBuffer, VK_NULL_HANDLE );
     }
     return vkMemoryRequirements;
+}
+
+void ComputeDevice::GetPhysicalDeviceProperties2KHR(VkPhysicalDeviceProperties2KHR* pVkPhysicalDeviceProperties2) const {
+    g_pVkGetPhysicalDeviceProperties2KHR( m_vkPhysicalDevice, pVkPhysicalDeviceProperties2 );
 }
 
 VkDeviceSize ComputeDevice::MinStorageBufferOffset(void) const {

@@ -145,6 +145,9 @@ public:
     // created with the device
     VkMemoryRequirements StorageBufferRequirements(VkDeviceSize) const;
 
+    // Returns the requested physical device properties
+    void GetPhysicalDeviceProperties2KHR(VkPhysicalDeviceProperties2KHR*) const;
+
     // Returns the minimum alignment of a storage buffer offset
     VkDeviceSize MinStorageBufferOffset(void) const;
 
