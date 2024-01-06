@@ -12,9 +12,8 @@
 //
 
 // C++ Standard Headers
+#include <algorithm>
 #include <iostream>
-#include <fstream>
-#include <cstring>
 
 #if defined (VULKAN_SUPPORT)
 // Vulkan Headers
@@ -23,7 +22,6 @@
 
 // Local Project Headers
 #include "Debug.h"
-#include "Batches.h"
 #include "SHA-256vk.h"
 
 #if defined (VULKAN_SUPPORT)
@@ -34,32 +32,16 @@
 PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
 PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
-#endif // defined (VULKAN_SUPPORT)
 
-// Function(s)
+namespace vkmr {
+using ::std::move;
+
+// Class(es)
 //
 
-int vkSha256(int argc, const char* argv[]) {
-#if defined (VULKAN_SUPPORT)
-    using namespace std;
+VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
 
-    // Look for an early out
-    size_t sum = 0;
-    for (int i = 0; i < argc; ++i){
-        sum += std::strlen( argv[i] );
-    }
-    if (sum == 0){
-        return 0;
-    }
-
-    // Read in the shader bytes
-    std::ifstream ifs( "SHA-256-n.spv", std::ios::binary | std::ios::ate );
-    const auto g = ifs.tellg( );
-    ifs.seekg( 0 );
-    std::vector<uint32_t> code( g / sizeof( uint32_t ) );
-    ifs.read( reinterpret_cast<char*>( code.data( ) ), g );
-    ifs.close( );
-    std::cout << "Loaded " << code.size() << " (32-bit) word(s) of shader code." << endl;
+    using ::std::endl;
 
     VkApplicationInfo vkAppInfo = {};
     vkAppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -97,46 +79,45 @@ int vkSha256(int argc, const char* argv[]) {
     vkCreateInfo.enabledExtensionCount = instanceExtNames.size( );
     vkCreateInfo.ppEnabledExtensionNames = instanceExtNames.data( );
 
-    VkInstance instance = VK_NULL_HANDLE;
-    VkResult vkResult = vkCreateInstance( &vkCreateInfo, VK_NULL_HANDLE, &instance );
-    if (vkResult == VK_SUCCESS){
-        // Load the extension
+    m_vkResult = ::vkCreateInstance( &vkCreateInfo, VK_NULL_HANDLE, &m_instance );
+    if (m_vkResult == VK_SUCCESS){
+        // Load the extensions
         g_pVkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)(
-            vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceProperties2KHR" )
+            ::vkGetInstanceProcAddr( m_instance, "vkGetPhysicalDeviceProperties2KHR" )
         );
         g_pVkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)(
-            vkGetInstanceProcAddr( instance, "vkGetPhysicalDeviceMemoryProperties2" )
+            ::vkGetInstanceProcAddr( m_instance, "vkGetPhysicalDeviceMemoryProperties2" )
         );
         g_VkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2KHR)(
-            vkGetInstanceProcAddr( instance, "vkCmdPipelineBarrier2KHR" )
+            ::vkGetInstanceProcAddr( m_instance, "vkCmdPipelineBarrier2KHR" )
         );
 
         // Count
         uint32_t vkPhysicalDeviceCount = 0;
-        vkEnumeratePhysicalDevices( instance, &vkPhysicalDeviceCount, VK_NULL_HANDLE );
+        ::vkEnumeratePhysicalDevices( m_instance, &vkPhysicalDeviceCount, VK_NULL_HANDLE );
 
         // Retrieve
         VkPhysicalDevice* vkPhysicalDevices = new VkPhysicalDevice[vkPhysicalDeviceCount];
-        vkEnumeratePhysicalDevices( instance, &vkPhysicalDeviceCount, vkPhysicalDevices );
+        ::vkEnumeratePhysicalDevices( m_instance, &vkPhysicalDeviceCount, vkPhysicalDevices );
         
         // Enumerate
         for (decltype(vkPhysicalDeviceCount) i = 0; i < vkPhysicalDeviceCount; ++i){
             VkPhysicalDevice vkPhysicalDevice = vkPhysicalDevices[i];
             VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
-            vkGetPhysicalDeviceProperties( vkPhysicalDevice, &vkPhysicalDeviceProperties );
+            ::vkGetPhysicalDeviceProperties( vkPhysicalDevice, &vkPhysicalDeviceProperties );
 
             std::cout << endl;
             std::cout << "Device #" << i << ": " << vkPhysicalDeviceProperties.deviceName << endl;
-            std::cout << "maxComputeWorkGroupSize: " << vkPhysicalDeviceProperties.limits.maxComputeSharedMemorySize << endl;
+            std::cout << "maxComputeWorkGroupSize: " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << endl;
             std::cout << "Device type: " << int(vkPhysicalDeviceProperties.deviceType) << endl;
 
             // Count
             uint32_t vkQueueFamilyCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties( vkPhysicalDevice, &vkQueueFamilyCount, VK_NULL_HANDLE );
+            ::vkGetPhysicalDeviceQueueFamilyProperties( vkPhysicalDevice, &vkQueueFamilyCount, VK_NULL_HANDLE );
 
             // Retrieve
             VkQueueFamilyProperties* vkQueueFamilyProperties = new VkQueueFamilyProperties[vkQueueFamilyCount];
-            vkGetPhysicalDeviceQueueFamilyProperties( vkPhysicalDevice, &vkQueueFamilyCount, vkQueueFamilyProperties );
+            ::vkGetPhysicalDeviceQueueFamilyProperties( vkPhysicalDevice, &vkQueueFamilyCount, vkQueueFamilyProperties );
             
             // Iterate
             uint32_t queueCount = 0, queueFamily = vkQueueFamilyCount;
@@ -163,73 +144,30 @@ int vkSha256(int argc, const char* argv[]) {
 
             // Look for an early out
             if (queueFamily >= vkQueueFamilyCount){
-                cerr << "Failed to find a compute queue; skipping this device." << endl;
+                ::std::cerr << "Failed to find a compute queue; skipping this device." << endl;
                 continue;
             }
             std::cout << "Selected queue family #" << queueFamily << endl;
 
-            // Query for the extended physical properties
-            if (g_pVkGetPhysicalDeviceProperties2KHR){
-                VkPhysicalDeviceExternalMemoryHostPropertiesEXT vkPhysicalDeviceExternalMemoryHostProperties = {};
-                vkPhysicalDeviceExternalMemoryHostProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
-                VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2 = {};
-                vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-                vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceExternalMemoryHostProperties;
-                g_pVkGetPhysicalDeviceProperties2KHR( vkPhysicalDevice, &vkPhysicalDeviceProperties2 );
-                std::cout << "vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment == " << vkPhysicalDeviceExternalMemoryHostProperties.minImportedHostPointerAlignment << endl << endl;
-            }else{
-                std::cerr << "'vkGetPhysicalDeviceProperties2KHR' could not be resolved." << endl; 
-            }
-
             // Create us a device to do the computation
-            vkmr::ComputeDevice device( vkPhysicalDevice, queueFamily, queueCount, code );
-            vkResult = static_cast<VkResult>( device );
-            if (vkResult != VK_SUCCESS){
-                cerr << "Failed to create a logical compute device on Vulkan" << std::endl;
+            ComputeDevice device( vkPhysicalDevice, queueFamily, queueCount );
+            if (static_cast<VkResult>( device ) == VK_SUCCESS){
+                // Wrap up and accumulate
+                const auto name = ::std::string( vkPhysicalDeviceProperties.deviceName );
+                m_instances.push_back( Instance( name, move( device ) ) );
                 continue;
             }
-
-            // Get a handle to a queue
-            VkQueue vkQueue = device.Queue( 0 );
-            if (vkQueue == VK_NULL_HANDLE){
-                cerr << "Failed to retrieve handle to device queue!" << endl;
-                continue;
-            }
-
-            // Create a new batch
-            auto batch = vkmr::NewBatch( (1024 * 1024), device );
-            if (!batch){
-                std::cerr << "Failed to create a new batch; skipping." << std::endl;
-                continue;
-            }
-
-            // Add the inputs to the batch
-            for (int i = 0; i < argc; ++i){
-                const auto arg = argv[i];
-                const auto added = batch->Add( arg, std::strlen( arg ) );
-                if (!added){
-                    break;
-                }
-            }
-
-            // Dispatch the batch..
-            vkResult = batch->Dispatch( vkQueue );
-            if (vkResult != VK_SUCCESS){
-                std::cerr << "Failed to dispatch the batch..?" << std::endl;
-            }
-            batch.reset( nullptr ); // Force the cleanup rather than relying on going out-of-scope in any particular order
+            ::std::cerr << "Failed to create a logical compute device on Vulkan" << std::endl;
         }
 
         // Cleanup
         delete[] vkPhysicalDevices;
-        vkDestroyInstance( instance, VK_NULL_HANDLE );
-        return 0;
+        return;
     }
-
 
     // Get the error name
     char* initError = NULL;
-    switch (vkResult) {
+    switch (m_vkResult) {
         case VK_ERROR_OUT_OF_HOST_MEMORY:
             initError = (char*) "VK_ERROR_OUT_OF_HOST_MEMORY";
             break;
@@ -254,9 +192,116 @@ int vkSha256(int argc, const char* argv[]) {
             initError = (char*) "(some other, unidentified error)";
             break;       
     }
-    cerr << "Failed to initialise Vulkan w/error: " << initError << endl;
-#else
-    std::cerr << "Vulkan not supported!" << std::endl;
-#endif
-    return 1;
+    ::std::cerr << "Failed to initialise Vulkan w/error: " << initError << ::std::endl;
 }
+
+VkSha256D::~VkSha256D() {
+
+    m_instances.clear( );
+    if (m_instance != VK_NULL_HANDLE){
+        ::vkDestroyInstance( m_instance, VK_NULL_HANDLE );
+    }
+}
+
+VkSha256D::operator bool() const {
+
+    if (m_instance == VK_NULL_HANDLE){
+        return false;
+    }
+    return !m_instances.empty( );
+}
+
+void VkSha256D::ForEach(::std::function<void(Instance&)> lambda) {
+    ::std::for_each( m_instances.begin( ), m_instances.end( ), lambda );
+}
+
+VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
+    IVkSha256DInstance( name ),
+    m_device( move( device ) ) {
+
+    m_pipeline = Mapping::Pipeline( m_device );
+    m_mapping = Mapping( *m_device, m_device.AllocateDescriptorSet( m_pipeline ), m_device.AllocateCommandBuffer( ) );
+    m_batch = Batch::New( m_device, 256 * 1024 * 1024 );
+    m_slice = slice_type::New( m_device, 256 * 1024 * 1024 );
+}
+
+VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
+    IVkSha256DInstance( instance.Name( ) ),
+    m_device( move( instance.m_device ) ),
+    m_mapping( move( instance.m_mapping ) ),
+    m_pipeline( move( instance.m_pipeline ) ),
+    m_batch( move( instance.m_batch ) ),
+    m_slice( move( instance.m_slice ) ),
+    m_reduction( move( instance.m_reduction ) ) {
+}
+
+VkSha256D::Instance::~Instance() {
+
+    m_pipeline = Pipeline( );
+    m_mapping = Mapping( );
+    m_batch = Batch( );
+    m_slice = slice_type( );
+    m_reduction = Reduction( );
+}
+
+VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instance) {
+
+    m_name = instance.Name( );
+    m_device = move( instance.m_device );
+    m_mapping = move( instance.m_mapping );
+    m_pipeline = move( instance.m_pipeline );
+    m_batch = move( instance.m_batch );
+    m_slice = move( instance.m_slice );
+    m_reduction = move( instance.m_reduction );
+    return (*this);
+}
+
+VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
+
+    using ::std::cerr;
+    using ::std::endl;
+
+    // Get a handle to a queue
+    VkQueue vkQueue = m_device.Queue( 0 );
+    if (vkQueue == VK_NULL_HANDLE){
+        cerr << "Failed to retrieve handle to device queue!" << endl;
+        return "<vkQueue>";
+    }
+
+    // Apply the mapping from the batch to the slice
+    m_mapping.Apply( m_batch, m_slice, m_pipeline );
+    if (!m_mapping){
+        // Ack
+        cerr << "Failed to apply the mapping with error: " << static_cast<int64_t>( static_cast<VkResult>( m_mapping ) ) << endl;
+        return "<mapping>";
+    }
+    auto vkResult = m_mapping.Dispatch( vkQueue );
+    if (vkResult != VK_SUCCESS){
+        cerr << "Failed to dispatch the mapping operation with error: " << static_cast<int64_t>( vkResult ) << endl;
+        return "<dispatch1>";
+    }
+
+    // Apply the reduction
+    m_reduction.Apply( m_slice, m_device );
+    if (!m_reduction){
+        // Ack
+        cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( static_cast<VkResult>( m_reduction ) ) << endl;
+        return "<reduction>";
+    }
+    vkResult = m_reduction.Dispatch( vkQueue );
+    if (vkResult != VK_SUCCESS){
+        cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;
+        return "<dispatch2>";
+    }
+    return "";
+}
+
+bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
+
+    if (m_slice.Reserve( )){
+        return m_batch.Push( arg.c_str( ), arg.size( ) );
+    }
+    return false;
+}
+} // namespace vkmr
+#endif // defined (VULKAN_SUPPORT)

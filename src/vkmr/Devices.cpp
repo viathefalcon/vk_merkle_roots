@@ -1,4 +1,4 @@
-// Devices.cpp: defines the types, functions and classes that slices memory for inputs and outputs
+// Devices.cpp: defines the types, functions and classes that encapsulate GPU devices
 //
 
 // Includes
@@ -19,47 +19,50 @@
 #if defined (VULKAN_SUPPORT)
 // Externals
 //
+
+// Vulkan Extension Function Pointers
 extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
 
 namespace vkmr {
 
 // Classes
 //
 
-DescriptorSet::DescriptorSet(VkDevice vkDevice, VkDescriptorPool vkDescriptorPool, VkDescriptorSetLayout vkDescriptorSetLayout, uint32_t descriptorSetCount):
+DescriptorSet::DescriptorSet(VkDevice vkDevice, VkDescriptorPool vkDescriptorPool, VkDescriptorSetLayout vkDescriptorSetLayout):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkDescriptorPool( vkDescriptorPool ),
-    m_descriptorSetCount( descriptorSetCount ),
     m_vkDescriptorSet( VK_NULL_HANDLE ) {
     
     VkDescriptorSetAllocateInfo vkDescriptorSetAllocateInfo = {};
     vkDescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     vkDescriptorSetAllocateInfo.descriptorPool = m_vkDescriptorPool;
-    vkDescriptorSetAllocateInfo.descriptorSetCount = m_descriptorSetCount;
+    vkDescriptorSetAllocateInfo.descriptorSetCount = 1U;
     vkDescriptorSetAllocateInfo.pSetLayouts = &vkDescriptorSetLayout;
     m_vkResult = ::vkAllocateDescriptorSets( m_vkDevice, &vkDescriptorSetAllocateInfo, &m_vkDescriptorSet );
+    if (m_vkResult != VK_SUCCESS){
+        Release( );
+    }
 }
 
 DescriptorSet::DescriptorSet(DescriptorSet&& descriptorSet):
     m_vkResult( descriptorSet.m_vkResult ),
     m_vkDevice( descriptorSet.m_vkDevice ),
     m_vkDescriptorPool( descriptorSet.m_vkDescriptorPool ),
-    m_descriptorSetCount( descriptorSet.m_descriptorSetCount ),
     m_vkDescriptorSet( descriptorSet.m_vkDescriptorSet ) {
 
-    descriptorSet.Release( );
+    descriptorSet.Reset( );
 }
 
 DescriptorSet& DescriptorSet::operator=(DescriptorSet&& descriptorSet) {
 
     if (this != &descriptorSet){
-        Release( );
+        this->Release( );
 
         m_vkResult = descriptorSet.m_vkResult;
         m_vkDevice = descriptorSet.m_vkDevice;
         m_vkDescriptorPool = descriptorSet.m_vkDescriptorPool;
-        m_descriptorSetCount = descriptorSet.m_descriptorSetCount;
         m_vkDescriptorSet = descriptorSet.m_vkDescriptorSet;
 
         descriptorSet.Reset( );
@@ -72,24 +75,21 @@ void DescriptorSet::Reset(void) {
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
     m_vkDescriptorPool = VK_NULL_HANDLE;
-    m_descriptorSetCount = uint32_t(-1);
     m_vkDescriptorSet = VK_NULL_HANDLE;
 }
 
 void DescriptorSet::Release(void) {
 
     if (m_vkDescriptorSet != VK_NULL_HANDLE){
-        ::vkFreeDescriptorSets( m_vkDevice, m_vkDescriptorPool, m_descriptorSetCount, &m_vkDescriptorSet );
+        ::vkFreeDescriptorSets( m_vkDevice, m_vkDescriptorPool, 1U, &m_vkDescriptorSet );
     }
     Reset( );
 }
 
-CommandBuffer::CommandBuffer(VkDevice vkDevice, VkCommandPool vkCommandPool, VkPipelineLayout vkPipelineLayout, VkPipeline vkPipeline):
+CommandBuffer::CommandBuffer(VkDevice vkDevice, VkCommandPool vkCommandPool):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkCommandPool( vkCommandPool ),
-    m_vkPipelineLayout( vkPipelineLayout ),
-    m_vkPipeline( vkPipeline ),
     m_vkCommandBuffer( VK_NULL_HANDLE ) {
     
     VkCommandBufferAllocateInfo vkCommandBufferAllocateInfo = {};
@@ -104,11 +104,9 @@ CommandBuffer::CommandBuffer(CommandBuffer&& commandBuffer):
     m_vkResult( commandBuffer.m_vkResult ),
     m_vkDevice( commandBuffer.m_vkDevice ),
     m_vkCommandPool( commandBuffer.m_vkCommandPool ),
-    m_vkPipelineLayout( commandBuffer.m_vkPipelineLayout ),
-    m_vkPipeline( commandBuffer.m_vkPipeline ),
     m_vkCommandBuffer( commandBuffer.m_vkCommandBuffer ) {
 
-    commandBuffer.Release( );
+    commandBuffer.Reset( );
 }
 
 CommandBuffer& CommandBuffer::operator=(CommandBuffer&& commandBuffer) {
@@ -119,8 +117,6 @@ CommandBuffer& CommandBuffer::operator=(CommandBuffer&& commandBuffer) {
         m_vkResult = commandBuffer.m_vkResult;
         m_vkDevice = commandBuffer.m_vkDevice;
         m_vkCommandPool = commandBuffer.m_vkCommandPool;
-        m_vkPipelineLayout = commandBuffer.m_vkPipelineLayout;
-        m_vkPipeline = commandBuffer.m_vkPipeline;
         m_vkCommandBuffer = commandBuffer.m_vkCommandBuffer;
 
         commandBuffer.Reset( );
@@ -128,64 +124,11 @@ CommandBuffer& CommandBuffer::operator=(CommandBuffer&& commandBuffer) {
     return (*this);
 }
 
-VkResult CommandBuffer::BindDispatch(DescriptorSet& descriptorSet, uint32_t count) {
-
-    // Look for an early out
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
-    }
-
-    VkCommandBufferBeginInfo vkCommandBufferBeginInfo = {};
-    vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    m_vkResult = ::vkBeginCommandBuffer( m_vkCommandBuffer, &vkCommandBufferBeginInfo );
-    if (m_vkResult == VK_SUCCESS){
-        ::vkCmdBindPipeline( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipeline );
-
-        VkDescriptorSet descriptorSets[] = { *descriptorSet };
-        ::vkCmdBindDescriptorSets( m_vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_vkPipelineLayout, 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
-
-        // c.f. https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples#cpu-read-back-of-data-written-by-a-compute-shader
-        // (These barriers may be redundant..?)
-        VkMemoryBarrier2KHR host2ShaderMemB = {};
-        host2ShaderMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        host2ShaderMemB.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
-        host2ShaderMemB.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT_KHR;
-        host2ShaderMemB.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-        host2ShaderMemB.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-        VkDependencyInfoKHR host2ShaderDep = {};
-        host2ShaderDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        host2ShaderDep.memoryBarrierCount = 1;
-        host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
-        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &host2ShaderDep );
-
-        // Actually dispatch the shader invocations
-        ::vkCmdDispatch( m_vkCommandBuffer, count, 1, 1 );
-
-        VkMemoryBarrier2KHR shader2HostMemB = {};
-        shader2HostMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        shader2HostMemB.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-        shader2HostMemB.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-        shader2HostMemB.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
-        shader2HostMemB.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
-        VkDependencyInfoKHR shader2HostDep = {};
-        shader2HostDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        shader2HostDep.memoryBarrierCount = 1;
-        shader2HostDep.pMemoryBarriers = &shader2HostMemB;
-        g_VkCmdPipelineBarrier2KHR( m_vkCommandBuffer, &shader2HostDep );
-
-        m_vkResult = ::vkEndCommandBuffer( m_vkCommandBuffer );
-    }
-    return m_vkResult;
-}
-
 void CommandBuffer::Reset(void) {
 
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
     m_vkCommandPool = VK_NULL_HANDLE;
-    m_vkPipelineLayout = VK_NULL_HANDLE;
-    m_vkPipeline = VK_NULL_HANDLE;
     m_vkCommandBuffer = VK_NULL_HANDLE;
 }
 
@@ -197,17 +140,102 @@ void CommandBuffer::Release(void) {
     Reset( );
 }
 
-ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFamily, uint32_t queueCount, const ::std::vector<uint32_t>& shaderCode):
+Pipeline::Pipeline(Pipeline&& pipeline):
+    m_vkDevice( pipeline.m_vkDevice ),
+    m_vkShaderModule( pipeline.m_vkShaderModule ),
+    m_vkDescriptorSetLayout( pipeline.m_vkDescriptorSetLayout ),
+    m_vkPipelineLayout( pipeline.m_vkPipelineLayout ),
+    m_vkPipeline( pipeline.m_vkPipeline ) {
+
+    pipeline.Reset( );
+}
+
+Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescriptorSetLayout vkDescriptorSetLayout):
+    m_vkDevice( vkDevice ),
+    m_vkShaderModule( vkShaderModule ),
+    m_vkDescriptorSetLayout( vkDescriptorSetLayout ),
+    m_vkPipelineLayout( VK_NULL_HANDLE ),
+    m_vkPipeline( VK_NULL_HANDLE ) {
+
+    // Create the pipeline layout
+    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
+    vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    vkPipelineLayoutCreateInfo.setLayoutCount = 1;
+    vkPipelineLayoutCreateInfo.pSetLayouts = &m_vkDescriptorSetLayout;
+    VkResult vkResult = ::vkCreatePipelineLayout( m_vkDevice, &vkPipelineLayoutCreateInfo, pAllocator, &m_vkPipelineLayout );
+    if (vkResult != VK_SUCCESS){
+        Release( );
+        return;
+    }
+
+    // Initialise the compute pipeline
+    VkPipelineShaderStageCreateInfo vkPipelineShaderStageCreateInfo = {};
+    vkPipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    vkPipelineShaderStageCreateInfo.module = m_vkShaderModule;
+    vkPipelineShaderStageCreateInfo.pName = "main";
+    VkComputePipelineCreateInfo vkComputePipelineCreateInfo = {};
+    vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
+    vkComputePipelineCreateInfo.layout = m_vkPipelineLayout;
+    vkResult = ::vkCreateComputePipelines( m_vkDevice, 0, 1, &vkComputePipelineCreateInfo, pAllocator, &m_vkPipeline );
+    if (vkResult != VK_SUCCESS){
+        Release( );
+        return;
+    }
+}
+
+Pipeline& Pipeline::operator=(Pipeline&& pipeline) {
+
+    if (this != &pipeline){
+        this->Release( );
+
+        m_vkDevice = pipeline.m_vkDevice;
+        m_vkShaderModule = pipeline.m_vkShaderModule;
+        m_vkDescriptorSetLayout = pipeline.m_vkDescriptorSetLayout;
+        m_vkPipelineLayout = pipeline.m_vkPipelineLayout;
+        m_vkPipeline = pipeline.m_vkPipeline;
+
+        pipeline.Reset( );
+    }
+    return (*this);
+}
+
+void Pipeline::Reset(void) {
+
+    m_vkDevice = VK_NULL_HANDLE;
+    m_vkShaderModule = VK_NULL_HANDLE;
+    m_vkDescriptorSetLayout = VK_NULL_HANDLE;
+    m_vkPipelineLayout = VK_NULL_HANDLE;
+    m_vkPipeline = VK_NULL_HANDLE;
+}
+
+void Pipeline::Release(void) {
+
+    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    if (m_vkPipeline != VK_NULL_HANDLE){
+        ::vkDestroyPipeline( m_vkDevice, m_vkPipeline, pAllocator );
+    }
+    if (m_vkPipelineLayout != VK_NULL_HANDLE){
+        ::vkDestroyPipelineLayout( m_vkDevice, m_vkPipelineLayout, pAllocator );
+    }
+    if (m_vkDescriptorSetLayout != VK_NULL_HANDLE){
+        ::vkDestroyDescriptorSetLayout( m_vkDevice, m_vkDescriptorSetLayout, pAllocator );
+    }
+    if (m_vkShaderModule != VK_NULL_HANDLE){
+        ::vkDestroyShaderModule( m_vkDevice, m_vkShaderModule, pAllocator );
+    }
+    Reset( );
+}
+
+ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFamily, uint32_t queueCount):
     m_vkPhysicalDevice( vkPhysicalDevice ),
     m_queueFamily( queueFamily ),
     m_queueCount( queueCount ),
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( VK_NULL_HANDLE),
-    m_vkShaderModule( VK_NULL_HANDLE ),
     m_vkCommandPool( VK_NULL_HANDLE),
-    m_vkDescriptorSetLayout( VK_NULL_HANDLE),
-    m_vkPipelineLayout( VK_NULL_HANDLE ),
-    m_vkPipeline( VK_NULL_HANDLE ),
     m_vkDescriptorPool( VK_NULL_HANDLE ) {
 
     using ::std::strcmp;
@@ -277,14 +305,6 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
     }
     m_vkResult = ::vkCreateDevice( vkPhysicalDevice, &vkDeviceCreateInfo, pAllocator, &m_vkDevice );
     if (m_vkResult == VK_SUCCESS){
-        // Create the shader module
-        VkShaderModuleCreateInfo vkShaderModuleCreateInfo = {};
-        vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        vkShaderModuleCreateInfo.codeSize = shaderCode.size( ) * sizeof( uint32_t );
-        vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( shaderCode.data( ) );
-        m_vkResult = ::vkCreateShaderModule( m_vkDevice, &vkShaderModuleCreateInfo, pAllocator, &m_vkShaderModule );
-    }
-    if (m_vkResult == VK_SUCCESS){
         // Create the command pool
         VkCommandPoolCreateInfo vkCommandPoolCreateInfo = {};
         vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -293,57 +313,14 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
         m_vkResult = ::vkCreateCommandPool( m_vkDevice, &vkCommandPoolCreateInfo, pAllocator, &m_vkCommandPool );
     }
     if (m_vkResult == VK_SUCCESS){
-        // Initialise the descriptor set layout
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding1 = {};
-        vkDescriptorSetLayoutBinding1.binding = 0;
-        vkDescriptorSetLayoutBinding1.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        vkDescriptorSetLayoutBinding1.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        vkDescriptorSetLayoutBinding1.descriptorCount = 1;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding2 = vkDescriptorSetLayoutBinding1;
-        vkDescriptorSetLayoutBinding2.binding = 1;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding3 = vkDescriptorSetLayoutBinding1;
-        vkDescriptorSetLayoutBinding3.binding = 2;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBindings[] = {
-            vkDescriptorSetLayoutBinding1,
-            vkDescriptorSetLayoutBinding2,
-            vkDescriptorSetLayoutBinding3
-        };
-        VkDescriptorSetLayoutCreateInfo vkDescriptorSetLayoutCreateInfo = {};
-        vkDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        vkDescriptorSetLayoutCreateInfo.bindingCount = 3;
-        vkDescriptorSetLayoutCreateInfo.pBindings = vkDescriptorSetLayoutBindings;
-        m_vkResult = ::vkCreateDescriptorSetLayout( m_vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &m_vkDescriptorSetLayout );
-    }
-    if (m_vkResult == VK_SUCCESS){
-        // Create the pipeline layout
-        VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
-        vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        vkPipelineLayoutCreateInfo.setLayoutCount = 1;
-        vkPipelineLayoutCreateInfo.pSetLayouts = &m_vkDescriptorSetLayout;
-        m_vkResult = ::vkCreatePipelineLayout( m_vkDevice, &vkPipelineLayoutCreateInfo, pAllocator, &m_vkPipelineLayout );
-    }
-    if (m_vkResult == VK_SUCCESS){
-        // Initialise the compute pipeline
-        VkPipelineShaderStageCreateInfo vkPipelineShaderStageCreateInfo = {};
-        vkPipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        vkPipelineShaderStageCreateInfo.module = m_vkShaderModule;
-        vkPipelineShaderStageCreateInfo.pName = "main";
-        VkComputePipelineCreateInfo vkComputePipelineCreateInfo = {};
-        vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
-        vkComputePipelineCreateInfo.layout = m_vkPipelineLayout;
-        m_vkResult = ::vkCreateComputePipelines( m_vkDevice, 0, 1, &vkComputePipelineCreateInfo, pAllocator, &m_vkPipeline );
-    }
-    if (m_vkResult == VK_SUCCESS){
         // Create the descriptor pool
         VkDescriptorPoolSize vkDescriptorPoolSize = {};
         vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        vkDescriptorPoolSize.descriptorCount = 3;
+        vkDescriptorPoolSize.descriptorCount = 6; // This is the total number, *across* descriptor sets allocated from the pool
         VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo = {};
         vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         vkDescriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        vkDescriptorPoolCreateInfo.maxSets = 1;
+        vkDescriptorPoolCreateInfo.maxSets = 2;
         vkDescriptorPoolCreateInfo.poolSizeCount = 1;
         vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
         m_vkResult = ::vkCreateDescriptorPool( m_vkDevice, &vkDescriptorPoolCreateInfo, pAllocator, &m_vkDescriptorPool );
@@ -356,31 +333,23 @@ ComputeDevice::ComputeDevice(ComputeDevice&& device):
     m_queueCount( device.m_queueCount ),
     m_vkResult( device.m_vkResult ),
     m_vkDevice( device.m_vkDevice),
-    m_vkShaderModule( device.m_vkShaderModule ),
     m_vkCommandPool( device.m_vkCommandPool),
-    m_vkDescriptorSetLayout( device.m_vkDescriptorSetLayout ),
-    m_vkPipelineLayout( device.m_vkPipelineLayout ),
-    m_vkPipeline( device.m_vkPipeline ),
     m_vkDescriptorPool( device.m_vkDescriptorPool ) {
 
-    device.Release( );
+    device.Reset( );
 }
 
 ComputeDevice& ComputeDevice::operator=(ComputeDevice&& device) {
 
     if (this != &device){
-        Release( );
+        this->Release( );
 
         m_vkPhysicalDevice = device.m_vkPhysicalDevice;
         m_queueFamily = device.m_queueFamily;
         m_queueCount = device.m_queueCount;
         m_vkResult = device.m_vkResult;
         m_vkDevice = device.m_vkDevice;
-        m_vkShaderModule = device.m_vkShaderModule;
         m_vkCommandPool = device.m_vkCommandPool;
-        m_vkDescriptorSetLayout = device.m_vkDescriptorSetLayout;
-        m_vkPipelineLayout = device.m_vkPipelineLayout;
-        m_vkPipeline = device.m_vkPipeline;
         m_vkDescriptorPool = device.m_vkDescriptorPool;
 
         device.Reset( );
@@ -388,7 +357,7 @@ ComputeDevice& ComputeDevice::operator=(ComputeDevice&& device) {
     return (*this);
 }
 
-VkQueue ComputeDevice::Queue(uint32_t queueIndex) {
+VkQueue ComputeDevice::Queue(uint32_t queueIndex) const {
 
     VkQueue vkQueue = VK_NULL_HANDLE;
     ::vkGetDeviceQueue( m_vkDevice, m_queueFamily, queueIndex, &vkQueue );
@@ -431,12 +400,87 @@ VkDeviceSize ComputeDevice::MinStorageBufferOffset(void) const {
     return properties.limits.minStorageBufferOffsetAlignment;
 }
 
-DescriptorSet ComputeDevice::AllocateDescriptorSet(uint32_t count) const {
-    return DescriptorSet( m_vkDevice, m_vkDescriptorPool, m_vkDescriptorSetLayout, count );
+DescriptorSet ComputeDevice::AllocateDescriptorSet(Pipeline& pipeline) const {
+    return DescriptorSet( m_vkDevice, m_vkDescriptorPool, pipeline.DescriptorSetLayout( ) );
 }
 
 CommandBuffer ComputeDevice::AllocateCommandBuffer(void) const {
-    return CommandBuffer( m_vkDevice, m_vkCommandPool, m_vkPipelineLayout, m_vkPipeline );
+    return CommandBuffer( m_vkDevice, m_vkCommandPool );
+}
+
+ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
+    const VkMemoryRequirements& vkMemoryRequirements,
+    VkMemoryPropertyFlags vkMemoryPropertyFlags) const {
+
+    // Query
+    VkPhysicalDeviceMemoryProperties2 vkPhysicalDeviceMemoryProperties2 = {};
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT vkPhysicalDeviceMemoryBudgetProperties = {};
+    if (g_pVkGetPhysicalDeviceMemoryProperties2KHR){
+        vkPhysicalDeviceMemoryBudgetProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+
+        vkPhysicalDeviceMemoryProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+        vkPhysicalDeviceMemoryProperties2.pNext = &vkPhysicalDeviceMemoryBudgetProperties;
+        g_pVkGetPhysicalDeviceMemoryProperties2KHR( m_vkPhysicalDevice, &vkPhysicalDeviceMemoryProperties2 );
+    }else{
+        // Fall back
+        vkGetPhysicalDeviceMemoryProperties( m_vkPhysicalDevice, &(vkPhysicalDeviceMemoryProperties2.memoryProperties) );
+    }
+
+    // Scan
+    MemoryTypeBudgets memoryTypeBudgets;
+    const auto pVkPhysicalDeviceMemoryProperties = &(vkPhysicalDeviceMemoryProperties2.memoryProperties);
+    for (decltype(pVkPhysicalDeviceMemoryProperties->memoryTypeCount) index = 0; index < pVkPhysicalDeviceMemoryProperties->memoryTypeCount; ++index){
+        VkMemoryType* vkMemoryType = (pVkPhysicalDeviceMemoryProperties->memoryTypes + index);
+        if ((vkMemoryType->propertyFlags & vkMemoryPropertyFlags) != vkMemoryPropertyFlags){
+            continue;
+        }
+
+        decltype(vkMemoryRequirements.memoryTypeBits) memoryTypeMask = (1 << index);
+        if ((vkMemoryRequirements.memoryTypeBits & memoryTypeMask) != memoryTypeMask){
+            continue;
+        }
+
+        VkMemoryHeap* pvkMemoryHeap = (pVkPhysicalDeviceMemoryProperties->memoryHeaps + vkMemoryType->heapIndex);
+        auto budget = vkPhysicalDeviceMemoryBudgetProperties.heapBudget[vkMemoryType->heapIndex];
+        if (budget == 0){
+            // Fallback
+            budget = pvkMemoryHeap->size;
+        }
+
+        // Map the index to the budget and accumulate
+        MemoryTypeBudget memoryTypeBudget = { index, budget, vkMemoryType->propertyFlags };
+        memoryTypeBudgets.push_back( memoryTypeBudget );
+    }
+
+    // Sort by budget descending and return
+    ::std::sort( memoryTypeBudgets.begin( ), memoryTypeBudgets.end( ), [](const MemoryTypeBudget& lhs, const MemoryTypeBudget& rhs) {
+        return lhs.vkMemoryBudget > rhs.vkMemoryBudget;
+    } );
+    return memoryTypeBudgets;
+}
+
+VkDeviceMemory ComputeDevice::Allocate(const MemoryTypeBudget& deviceMemoryBudget, VkDeviceSize vkSize) {
+
+    VkMemoryAllocateInfo vkDeviceMemoryAllocateInfo = {};
+    vkDeviceMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    vkDeviceMemoryAllocateInfo.allocationSize = vkSize;
+    vkDeviceMemoryAllocateInfo.memoryTypeIndex = deviceMemoryBudget.memoryTypeIndex;
+    VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
+    VkResult vkResult = ::vkAllocateMemory( m_vkDevice, &vkDeviceMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
+    if (vkResult == VK_SUCCESS){
+        ::std::cout << "Allocated " << int64_t(vkSize) << " bytes of memory type " << vkDeviceMemoryAllocateInfo.memoryTypeIndex << ::std::endl;
+
+        // TODO, maybe: keep track of allocations? But, would that ever be useful?
+        return vkDeviceMemory;
+    }
+    return VK_NULL_HANDLE;
+}
+
+void ComputeDevice::Free(VkDeviceMemory vkDeviceMemory) const {
+
+    if (vkDeviceMemory != VK_NULL_HANDLE){
+        ::vkFreeMemory( m_vkDevice, vkDeviceMemory, VK_NULL_HANDLE );
+    }
 }
 
 void ComputeDevice::Reset() {
@@ -446,11 +490,7 @@ void ComputeDevice::Reset() {
     m_queueFamily = uint32_t(-1);
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
-    m_vkShaderModule = VK_NULL_HANDLE;
     m_vkCommandPool = VK_NULL_HANDLE;
-    m_vkDescriptorSetLayout = VK_NULL_HANDLE;
-    m_vkPipelineLayout = VK_NULL_HANDLE;
-    m_vkPipeline = VK_NULL_HANDLE;
     m_vkDescriptorPool = VK_NULL_HANDLE;
 }
 
@@ -460,20 +500,8 @@ void ComputeDevice::Release() {
     if (m_vkDescriptorPool != VK_NULL_HANDLE){
         ::vkDestroyDescriptorPool( m_vkDevice, m_vkDescriptorPool, pAllocator );
     }
-    if (m_vkPipeline != VK_NULL_HANDLE){
-        ::vkDestroyPipeline( m_vkDevice, m_vkPipeline, pAllocator );
-    }
-    if (m_vkPipelineLayout != VK_NULL_HANDLE){
-        ::vkDestroyPipelineLayout( m_vkDevice, m_vkPipelineLayout, pAllocator );
-    }
-    if (m_vkDescriptorSetLayout != VK_NULL_HANDLE){
-        ::vkDestroyDescriptorSetLayout( m_vkDevice, m_vkDescriptorSetLayout, pAllocator );
-    }
     if (m_vkCommandPool != VK_NULL_HANDLE){
         ::vkDestroyCommandPool( m_vkDevice, m_vkCommandPool, pAllocator );
-    }
-    if (m_vkShaderModule != VK_NULL_HANDLE){
-        ::vkDestroyShaderModule( m_vkDevice, m_vkShaderModule, pAllocator );
     }
     if (m_vkDevice != VK_NULL_HANDLE){
         ::vkDestroyDevice( m_vkDevice, pAllocator );

@@ -87,14 +87,25 @@ int main(int argc, const char* argv[]) {
     using std::cout;
     using std::endl;
 
-    int result = 0;
-#if defined (_MACOS_64_)
     vkmr::CpuSha256D mrc;
+#if defined (VULKAN_SUPPORT)
+    vkmr::VkSha256D instances;
+#endif
+
+    // Loop over the inputs
     while (true) {
         const auto arg = get( );
         if (arg.empty( )){
             break;
         }
+
+#if defined (VULKAN_SUPPORT)
+        // Copy into each of the Vulkan-based instances
+        instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
+            instance.Add( arg );
+        } );
+#endif
+
         const auto hashed = vkmr::cpu_sha256d( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
 
@@ -102,17 +113,12 @@ int main(int argc, const char* argv[]) {
             break;
         }
     }
-    cout << "Root => " << print_bytes( mrc.Run( ) ).str( ) << endl;
-#else
-    for (int i = 1; i < argc; ++i) {
-        const auto arg = std::string( argv[i] );
-        const auto hashed = vkmr::cpu_sha256d( arg );
-        cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
-    }
-#endif
-
+    cout << "Root => " << print_bytes( mrc.Root( ) ).str( ) << endl;
 #if defined (VULKAN_SUPPORT)
-    vkSha256( argc - 1, argv + 1 );
+    instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
+        cout << instance.Name( ) << ":" << endl;
+        instance.Root( );
+    } );
 #endif
-    return result;
+    return 0;
 }

@@ -30,7 +30,7 @@ public:
     typedef ::std::string arg_type;
     typedef ::std::string out_type;
 
-    out_type Run(void) const;
+    out_type Root(void) const;
 
     bool Add(const arg_type&& arg) {
         m_args.push_back( arg );

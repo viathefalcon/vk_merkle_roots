@@ -1,4 +1,4 @@
-// Batches.h: declares the types, functions and classes that slices memory for inputs and outputs
+// Batches.h: declares the types, functions and classes that slices memory for inputs
 //
 
 #ifndef __VKMR_BATCHES_H__
@@ -23,44 +23,82 @@
 
 // Local Project Headers
 #include "Devices.h"
+#include "../common/SHA-256defs.h"
 
 namespace vkmr {
 
 // Class(es)
 //
 
+// Encapsulates a batch of inputs
 class Batch {
 public:
-    virtual ~Batch() = default;
+    typedef struct {
 
-    // Gives the current/most recent status 
-    operator VkResult() const { return m_vkResult; }
+        VkDescriptorBufferInfo vkDescriptorBufferInputs;
+        VkDescriptorBufferInfo vkDescriptorBufferMetdata;
 
-    // Return the size of the batch
-    virtual VkDeviceSize Size(void) const = 0;
+    } VkBufferDescriptors;
 
-    // Accumulate the given string in the batch
-    virtual bool Add(const char*, size_t) = 0;
+    Batch(Batch&&);
+    Batch(Batch const&) = delete;
+    Batch(void) { Reset( ); }
+
+    ~Batch(void) { Release( ); }
+
+    Batch& operator=(Batch&&);
+    Batch& operator=(Batch const&) = delete;
+    operator bool() const { return (m_pData != nullptr); }
+
+    // Returns the underlying buffer
+    VkBuffer Buffer(void) const { return m_vkBuffer; } 
+
+    // Returns the size of the batch
+    VkDeviceSize Size(void) const { return m_vkSize; }
+
+    // Returns the number of strings in the batch
+    size_t Count(void) const { return m_count; }
 
     // Prepares the batch for reuse
-    virtual void Reset(void) = 0;
+    void Reuse(void);
 
-    // Dispatches the batch on the given queue for processing
-    virtual VkResult Dispatch(VkQueue) = 0;
+    // Pushes the given string onto the batch
+    bool Push(const char*, size_t);
 
-protected:
-    VkResult m_vkResult;
+    // Pops the last string off the batch
+    void Pop(void);
+
+    // Returns the buffer descriptors
+    VkBufferDescriptors BufferDescriptors(void) const;
+
+    // Allocates and returns a new batch
+    static Batch New(ComputeDevice&, VkDeviceSize);
+
+private:
+    Batch(const ComputeDevice&, VkDeviceMemory, VkDeviceSize);
+
+    void Reset(void);
+    void Release(void);
+
+    // Adjusts the given offset to be aligned to the lowest common multiple
+    // of the minimum such offset for the underlying device and a given type
+    size_t AlignOffset(size_t, size_t);
+
+    // Counts the number of 32-bit words
+    // needed to hold a string of the given (byte)
+    // length
+    static uint32_t WordCount(size_t);
+
+    VkDevice m_vkDevice;
+    VkBuffer m_vkBuffer;
+    VkDeviceMemory m_vkDeviceMemory;
+    VkDeviceSize m_vkSize, m_minStorageBufferOffsetAlignment;
+
+    void* m_pData;
+    size_t m_count, m_metadata_offset;
 };
 
-}
-
-// Function(s)
-//
-
-namespace vkmr {
-// Creates a new batch, if possible, of the given size
-std::unique_ptr<Batch> NewBatch(VkDeviceSize, const ComputeDevice&);
-}
+} // namespace vkmr
 
 #endif // VULKAN_SUPPORT
 #endif // __VKMR_BATCHES_H__

@@ -29,10 +29,10 @@ namespace vkmr {
 // Encapsulates a descriptor set
 class DescriptorSet {
 public:
-    DescriptorSet(VkDevice, VkDescriptorPool, VkDescriptorSetLayout, uint32_t);
+    DescriptorSet(VkDevice, VkDescriptorPool, VkDescriptorSetLayout);
     DescriptorSet(DescriptorSet&&);
-    DescriptorSet(DescriptorSet&) = delete;
-    DescriptorSet(void)  { Reset( ); }
+    DescriptorSet(DescriptorSet const&) = delete;
+    DescriptorSet(void) { Reset( ); }
     ~DescriptorSet(void) { Release( ); }
 
     DescriptorSet& operator=(DescriptorSet&&);
@@ -50,7 +50,6 @@ private:
     VkResult m_vkResult;
     VkDevice m_vkDevice;
     VkDescriptorPool m_vkDescriptorPool;
-    uint32_t m_descriptorSetCount;
 
     VkDescriptorSet m_vkDescriptorSet;
 };
@@ -58,10 +57,10 @@ private:
 // Encapsulates a command buffer
 class CommandBuffer {
 public:
-    CommandBuffer(VkDevice, VkCommandPool, VkPipelineLayout, VkPipeline);
+    CommandBuffer(VkDevice, VkCommandPool);
     CommandBuffer(CommandBuffer&&);
-    CommandBuffer(CommandBuffer&) = delete;
-    CommandBuffer(void)  { Reset( ); }
+    CommandBuffer(CommandBuffer const&) = delete;
+    CommandBuffer(void) { Reset( ); }
     ~CommandBuffer(void) { Release( ); }
 
     CommandBuffer& operator=(CommandBuffer&&);
@@ -72,9 +71,6 @@ public:
     // Returns the underlying command buffer
     VkCommandBuffer operator * () const { return m_vkCommandBuffer; }
 
-    // Updates the command buffer
-    VkResult BindDispatch(DescriptorSet&, uint32_t);
-
 private:
     void Reset(void);
     void Release(void);
@@ -82,16 +78,50 @@ private:
     VkResult m_vkResult;
     VkDevice m_vkDevice;
     VkCommandPool m_vkCommandPool;
-    VkPipelineLayout m_vkPipelineLayout;
-    VkPipeline m_vkPipeline;
 
     VkCommandBuffer m_vkCommandBuffer;
+};
+
+typedef struct {
+    uint32_t memoryTypeIndex;
+    VkDeviceSize vkMemoryBudget;
+    VkMemoryPropertyFlags vkMemoryPropertyFlags;
+} MemoryTypeBudget;
+
+// Encapsulates a pipeline
+class Pipeline {
+public:
+    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout);
+    Pipeline(Pipeline&&);
+    Pipeline(Pipeline const&) = delete;
+
+    Pipeline(void) { Reset( ); }
+    ~Pipeline(void) { Release( ); }
+
+    Pipeline& operator=(Pipeline const&) = delete;
+    Pipeline& operator=(Pipeline&&);
+
+    operator bool() const { return (m_vkPipeline != VK_NULL_HANDLE); }
+    VkPipeline operator * () const { return m_vkPipeline; }
+
+    VkDescriptorSetLayout DescriptorSetLayout(void) const { return m_vkDescriptorSetLayout; }
+    VkPipelineLayout Layout(void) const { return m_vkPipelineLayout; }
+
+private:
+    void Reset(void);
+    void Release(void);
+
+    VkDevice m_vkDevice;
+    VkShaderModule m_vkShaderModule;
+    VkDescriptorSetLayout m_vkDescriptorSetLayout;
+    VkPipelineLayout m_vkPipelineLayout;
+    VkPipeline m_vkPipeline;
 };
 
 // Encapsulates a (logical, Vulkan) compute device
 class ComputeDevice {
 public:
-    ComputeDevice(VkPhysicalDevice, uint32_t, uint32_t, const ::std::vector<uint32_t>&);
+    ComputeDevice(VkPhysicalDevice, uint32_t, uint32_t);
     ComputeDevice(ComputeDevice&&);
     ComputeDevice(const ComputeDevice&) = delete;
     ComputeDevice(void) { Reset( ); }
@@ -109,7 +139,7 @@ public:
     VkPhysicalDevice PhysicalDevice(void) const { return m_vkPhysicalDevice; }
 
     // Returns the queue with the given index
-    VkQueue Queue(uint32_t);
+    VkQueue Queue(uint32_t) const;
 
     // Returns the memory requirement of storage buffers
     // created with the device
@@ -119,10 +149,23 @@ public:
     VkDeviceSize MinStorageBufferOffset(void) const;
 
     // Allocates and returns a descriptor set
-    DescriptorSet AllocateDescriptorSet(uint32_t) const;
+    DescriptorSet AllocateDescriptorSet(void) const;
+
+    // Allocates and returns a descriptor set for the given pipeline
+    DescriptorSet AllocateDescriptorSet(Pipeline&) const;
 
     // Allocates and returns a command buffer
-    CommandBuffer AllocateCommandBuffer(void) const;
+    CommandBuffer AllocateCommandBuffer() const;
+
+    // Returns the available memory types corresponding to the given requirements
+    typedef ::std::vector<MemoryTypeBudget> MemoryTypeBudgets;
+    MemoryTypeBudgets AvailableMemoryTypes(const VkMemoryRequirements&, VkMemoryPropertyFlags) const;
+
+    // Allocates up to the given amount of device memory
+    VkDeviceMemory Allocate(const MemoryTypeBudget&, VkDeviceSize vkSize);
+
+    // Frees the given, previously-allocated bit of memory
+    void Free(VkDeviceMemory) const;    
 
 private:
     void Reset(void);
@@ -133,15 +176,11 @@ private:
 
     VkResult m_vkResult;
     VkDevice m_vkDevice;
-    VkShaderModule m_vkShaderModule;
     VkCommandPool m_vkCommandPool;
-    VkDescriptorSetLayout m_vkDescriptorSetLayout;
-    VkPipelineLayout m_vkPipelineLayout;
-    VkPipeline m_vkPipeline;
     VkDescriptorPool m_vkDescriptorPool;
 };
 
-}
+} // namespace vkmr
 
 #endif // VULKAN_SUPPORT
 #endif // __VKMR_DEVICES_H__

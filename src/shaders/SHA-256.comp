@@ -42,6 +42,13 @@ layout(std430, set = 0, binding = 2) writeonly buffer results
 };
 #endif // _SHA_256_N_
 
+#ifdef _SHA_256_2_
+
+// TODO
+// ...
+
+#endif // _SHA_256_2_
+
 // Constants
 //
 
@@ -245,16 +252,15 @@ void main() {
 	const uint wc = (SHA256_WC / 2);
 	uint s = 0;
 	for ( ; s < wc; ++s){
-		const uint v = H1[s];
-
-		// The output of the algorithm is big-endian in nature
-		result[gid].data[s] = SWOP_ENDS_U32( v );
+		result[gid].data[s] = H1[s];
 	}
 	for (uint r = 0; r < wc; ++r, ++s){
-		const uint v = H2[r];
-
-		// The output of the algorithm is big-endian in nature
-		result[gid].data[s] = SWOP_ENDS_U32( v );
+		result[gid].data[s] = H2[r];
 	}
 }
 #endif // _SHA_256_N_
+
+#ifdef _SHA_256_2_
+void main() {
+}
+#endif // _SHA_256_2_
