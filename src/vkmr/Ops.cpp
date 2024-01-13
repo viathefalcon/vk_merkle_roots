@@ -111,7 +111,6 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
         ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
         // c.f. https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples#cpu-read-back-of-data-written-by-a-compute-shader
-        // (These barriers may be redundant..?)
         VkMemoryBarrier2KHR host2ShaderMemB = {};
         host2ShaderMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
         host2ShaderMemB.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
@@ -126,19 +125,6 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
 
         // Actually dispatch the shader invocations
         ::vkCmdDispatch( vkCommandBuffer, static_cast<uint32_t>( batch.Count( ) ), 1, 1 );
-
-        VkMemoryBarrier2KHR shader2HostMemB = {};
-        shader2HostMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        shader2HostMemB.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-        shader2HostMemB.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-        shader2HostMemB.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
-        shader2HostMemB.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
-        VkDependencyInfoKHR shader2HostDep = {};
-        shader2HostDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        shader2HostDep.memoryBarrierCount = 1;
-        shader2HostDep.pMemoryBarriers = &shader2HostMemB;
-        g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &shader2HostDep );
-
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }
     return (*this);
@@ -150,9 +136,15 @@ VkResult Mapping::Dispatch(VkQueue vkQueue) {
     if (m_vkResult != VK_SUCCESS){
         return m_vkResult;
     }
+
+    // Reset the fence
+    m_vkResult = ::vkResetFences( m_vkDevice, 1, &m_vkFence );
+    if (m_vkResult != VK_SUCCESS){
+        return m_vkResult;
+    }
     VkCommandBuffer commandBuffers[] = { *m_commandBuffer };
 
-    // Submit unto the queue
+    // Submit the (presumably previously-recordded) commands onto the queue
     VkSubmitInfo vkSubmitInfo = {};
     vkSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     vkSubmitInfo.commandBufferCount = 1;
@@ -247,8 +239,26 @@ Reduction::Reduction(Reduction&& reduction):
     m_count( reduction.m_count ),
     m_vkBufferHost( reduction.m_vkBufferHost ),
     m_vkHostMemory( reduction.m_vkHostMemory ),
+    m_descriptorSet( move( reduction.m_descriptorSet ) ),
     m_commandBuffer( move( reduction.m_commandBuffer ) ) {
     reduction.Reset( );
+}
+
+Reduction::Reduction(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer):
+    m_vkResult( VK_RESULT_MAX_ENUM ),
+    m_vkDevice( vkDevice ),
+    m_vkSize( 0U ),
+    m_count( 0U ),
+    m_vkFence( VK_NULL_HANDLE ),
+    m_vkBufferHost( VK_NULL_HANDLE ),
+    m_vkHostMemory( VK_NULL_HANDLE ),
+    m_descriptorSet( move( descriptorSet ) ),
+    m_commandBuffer( move( commandBuffer ) ) {
+
+    // Create the fence
+    VkFenceCreateInfo vkFenceCreateInfo = {};
+    vkFenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    m_vkResult = ::vkCreateFence( m_vkDevice, &vkFenceCreateInfo, VK_NULL_HANDLE, &m_vkFence );
 }
 
 Reduction& Reduction::operator=(Reduction&& reduction) {
@@ -258,11 +268,12 @@ Reduction& Reduction::operator=(Reduction&& reduction) {
 
         m_vkResult = reduction.m_vkResult;
         m_vkDevice = reduction.m_vkDevice;
-        m_vkFence = reduction.m_vkFence;
         m_vkSize = reduction.m_vkSize;
         m_count = reduction.m_count;
+        m_vkFence = reduction.m_vkFence;
         m_vkBufferHost = reduction.m_vkBufferHost;
         m_vkHostMemory = reduction.m_vkHostMemory;
+        m_descriptorSet = move( reduction.m_descriptorSet );
         m_commandBuffer = move( reduction.m_commandBuffer );
 
         reduction.Reset( );
@@ -270,9 +281,23 @@ Reduction& Reduction::operator=(Reduction&& reduction) {
     return (*this);
 }
 
-Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device) {
+Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device, vkmr::Pipeline& pipeline) {
 
-    this->Release( );
+    // Update the descriptor set
+    const auto sliceBufferDescriptor = slice.BufferDescriptor( );
+    VkWriteDescriptorSet vkWriteDescriptorSet = {};
+    vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    vkWriteDescriptorSet.dstSet = *m_descriptorSet;
+    vkWriteDescriptorSet.descriptorCount = 1;
+    vkWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    vkWriteDescriptorSet.pBufferInfo = &(sliceBufferDescriptor);
+    VkWriteDescriptorSet vkWriteDescriptorSets[] = {
+        vkWriteDescriptorSet
+    };
+    ::vkUpdateDescriptorSets( m_vkDevice, 1, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
+
+    // Release any previously-held memory
+    this->Free( );
 
     // Get the (approx) memory requirements
     m_count = slice.Reserved( );
@@ -300,8 +325,6 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device)
     }
     m_vkResult = (m_vkHostMemory == VK_NULL_HANDLE) ? VK_ERROR_UNKNOWN : VK_SUCCESS;
     if (m_vkResult == VK_SUCCESS){
-        m_vkDevice = *device;
-
         // Create a buffer
         VkBufferCreateInfo vkBufferCreateInfo = {};
         vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -320,8 +343,7 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device)
         m_vkResult = ::vkBindBufferMemory( m_vkDevice, m_vkBufferHost, m_vkHostMemory, 0U );
     }
     if (m_vkResult == VK_SUCCESS){
-        // Get a new command buffer
-        m_commandBuffer = device.AllocateCommandBuffer( );
+        // Get the command buffer
         auto vkCommandBuffer = *m_commandBuffer;
 
         // Start recording commands into it
@@ -330,6 +352,27 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device)
         vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         m_vkResult = ::vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
         if (m_vkResult == VK_SUCCESS){
+            ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
+            VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
+            ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
+
+            // Actually dispatch the shader invocations
+            ::vkCmdDispatch( vkCommandBuffer, (m_count / 2), 1, 1 );
+
+            // Insert a barrier such that the writes from the shader complete
+            // before we try and copy back to host-mappable memory
+            VkMemoryBarrier2KHR vkMemoryBarrier = {};
+            vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+            vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+            vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+            vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+            vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
+            VkDependencyInfoKHR vkDependencyInfo = {};
+            vkDependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            vkDependencyInfo.memoryBarrierCount = 1;
+            vkDependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+            g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
+
             // Add the command to copy from the slice buffer to the one we've allocated
             VkBufferCopy vkBufferCopy = {};
             vkBufferCopy.size = m_vkSize;
@@ -338,14 +381,6 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device)
         if (m_vkResult == VK_SUCCESS){
             m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
         }
-    }
-
-    // If we get this far successfully, then we're going to need a fence
-    if (m_vkResult == VK_SUCCESS){
-        // Create the fence
-        VkFenceCreateInfo vkFenceCreateInfo = {};
-        vkFenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        m_vkResult = ::vkCreateFence( m_vkDevice, &vkFenceCreateInfo, VK_NULL_HANDLE, &m_vkFence );
     }
     return (*this);
 }
@@ -358,6 +393,12 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
+    }
+
+    // Reset the fence
+    m_vkResult = ::vkResetFences( m_vkDevice, 1, &m_vkFence );
+    if (m_vkResult != VK_SUCCESS){
+        return m_vkResult;
     }
     VkCommandBuffer commandBuffers[] = { *m_commandBuffer };
 
@@ -403,6 +444,69 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     return m_vkResult;
 }
 
+Pipeline Reduction::Pipeline(ComputeDevice& device) {
+
+    // Look for an early out
+    auto vkDevice = *device;
+    if (vkDevice == VK_NULL_HANDLE){
+        return vkmr::Pipeline( );
+    }
+
+    // Prep
+    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+
+    // Load the shader code
+    ::std::ifstream ifs( "SHA-256-2-be.spv", ::std::ios::binary | ::std::ios::ate );
+    const auto g = ifs.tellg( );
+    ifs.seekg( 0 );
+    std::vector<uint32_t> shaderCode( g / sizeof( uint32_t ) );
+    ifs.read( reinterpret_cast<char*>( shaderCode.data( ) ), g );
+    ifs.close( );
+    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code." << ::std::endl;
+
+    // Create the shader module
+    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
+    VkShaderModuleCreateInfo vkShaderModuleCreateInfo = {};
+    vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    vkShaderModuleCreateInfo.codeSize = shaderCode.size( ) * sizeof( uint32_t );
+    vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( shaderCode.data( ) );
+    VkResult vkResult = ::vkCreateShaderModule( vkDevice, &vkShaderModuleCreateInfo, pAllocator, &vkShaderModule );
+
+    // Create the descriptor set layout
+    VkDescriptorSetLayout vkDescriptorSetLayout = VK_NULL_HANDLE;
+    if (vkResult == VK_SUCCESS){
+        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding1 = {};
+        vkDescriptorSetLayoutBinding1.binding = 0;
+        vkDescriptorSetLayoutBinding1.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        vkDescriptorSetLayoutBinding1.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        vkDescriptorSetLayoutBinding1.descriptorCount = 1;
+        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBindings[] = {
+            vkDescriptorSetLayoutBinding1
+        };
+        VkDescriptorSetLayoutCreateInfo vkDescriptorSetLayoutCreateInfo = {};
+        vkDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        vkDescriptorSetLayoutCreateInfo.bindingCount = 1;
+        vkDescriptorSetLayoutCreateInfo.pBindings = vkDescriptorSetLayoutBindings;
+        vkResult = ::vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &vkDescriptorSetLayout );
+    }
+
+    // Wrap it all up, maybe
+    return (vkResult == VK_SUCCESS)
+        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout )
+        : vkmr::Pipeline( );
+}
+
+void Reduction::Free(void) {
+
+    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    if (m_vkBufferHost != VK_NULL_HANDLE){
+        ::vkDestroyBuffer( m_vkDevice, m_vkBufferHost, pAllocator );
+    }
+    if (m_vkHostMemory != VK_NULL_HANDLE){
+        ::vkFreeMemory( m_vkDevice, m_vkHostMemory, pAllocator );
+    }
+}
+
 void Reduction::Reset(void) {
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
@@ -415,16 +519,11 @@ void Reduction::Reset(void) {
 
 void Reduction::Release(void) {
 
-    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    this->Free( );
     if (m_vkFence != VK_NULL_HANDLE){
-        ::vkDestroyFence( m_vkDevice, m_vkFence, pAllocator );
+        ::vkDestroyFence( m_vkDevice, m_vkFence, VK_NULL_HANDLE );
     }
-    if (m_vkBufferHost != VK_NULL_HANDLE){
-        ::vkDestroyBuffer( m_vkDevice, m_vkBufferHost, pAllocator );
-    }
-    if (m_vkHostMemory != VK_NULL_HANDLE){
-        ::vkFreeMemory( m_vkDevice, m_vkHostMemory, pAllocator );
-    }
+    m_descriptorSet = DescriptorSet( );
     m_commandBuffer = CommandBuffer( );
     Reset( );
 }

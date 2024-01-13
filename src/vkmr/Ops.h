@@ -49,6 +49,7 @@ private:
 class Reduction {
 public:
     Reduction(Reduction&&);
+    Reduction(VkDevice, DescriptorSet&&, CommandBuffer&&);
     Reduction(Reduction const&) = delete;
 
     Reduction(void) { Reset( ); }
@@ -59,12 +60,13 @@ public:
     operator bool() const { return (m_vkResult == VK_SUCCESS); }
     operator VkResult() const { return m_vkResult; }
 
-    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&);
+    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, vkmr::Pipeline&);
     VkResult Dispatch(VkQueue);
 
-    static Pipeline Pipeline(ComputeDevice&) { return vkmr::Pipeline( ); }
+    static Pipeline Pipeline(ComputeDevice&);
 
 private:
+    void Free(void);
     void Reset(void);
     void Release(void);
 
@@ -77,6 +79,7 @@ private:
     VkBuffer m_vkBufferHost;
     VkDeviceMemory m_vkHostMemory;
 
+    DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
 };
 

@@ -76,10 +76,11 @@ private:
     typedef Slice<VkSha256Result> slice_type;
 
     ComputeDevice m_device;
+    Pipeline m_mapping_pipeline;
     Mapping m_mapping;
-    Pipeline m_pipeline;
     Batch m_batch;
     slice_type m_slice; 
+    Pipeline m_reduction_pipeline;
     Reduction m_reduction;
 };
 #endif // defined (VULKAN_SUPPORT)

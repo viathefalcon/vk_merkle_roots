@@ -42,12 +42,12 @@ layout(std430, set = 0, binding = 2) writeonly buffer results
 };
 #endif // _SHA_256_N_
 
-#ifdef _SHA_256_2_
-
-// TODO
-// ...
-
-#endif // _SHA_256_2_
+#ifdef _SHA_256_2_BE_
+layout(std430, set = 0, binding = 0) buffer leaves
+{
+    VkSha256Result leaf[];
+};
+#endif // _SHA_256_2_BE_
 
 // Constants
 //
@@ -78,30 +78,21 @@ const uint c_constants[] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf,
 const uvec4 Hinitial1 = uvec4( 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a );
 const uvec4 Hinitial2 = uvec4( 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 );
 
+// Globals
+//
+
+// Holds the current message block
+uint M[SHA256_MESSAGE_BLOCK_WC];
+
 // Functions
 //
 
-// Computes the SHA-256 hash of the given 256-bit Big Endian input
-void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
+// Performs a single round of SHA-256 hashing on big-endian inputs
+void sha256_be_round(inout uvec4 H1, inout uvec4 H2) {
 
-	// Initialise the message
-	uint M[SHA256_MESSAGE_BLOCK_WC];
-	uint w = 0;
-	for ( ; w < 4; ++w){
-		M[w] = arg1[w];
-	}
-	for (uint x = 0; w < 8; ++w, ++x){
-		M[w] = arg2[x];
-	}
-	for (; w < (SHA256_MESSAGE_BLOCK_WC - 1); ++w){
-		M[w] = 0U;
-	}
-	M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
-	M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
-
-	// Initialise the working variables
-	uvec4 h1 = Hinitial1;
-	uvec4 h2 = Hinitial2;
+	// Prep the working variables
+	uvec4 h1 = H1;
+	uvec4 h2 = H2;
 
 	// Loop
 	uint W[64];
@@ -123,8 +114,31 @@ void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
 	}
 
 	// Accumulate the result
-	arg1 = Hinitial1 + h1;
-	arg2 = Hinitial2 + h2;
+	H1 += h1;
+	H2 += h2;
+}
+
+// Computes the SHA-256 hash of the given 256-bit Big Endian input
+void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
+
+	// Initialise the message
+	uint w = 0;
+	for ( ; w < 4; ++w){
+		M[w] = arg1[w];
+	}
+	for (uint x = 0; w < 8; ++w, ++x){
+		M[w] = arg2[x];
+	}
+	for (; w < (SHA256_MESSAGE_BLOCK_WC - 1); ++w){
+		M[w] = 0U;
+	}
+	M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
+	M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
+
+	// Do the hashing
+	arg1 = Hinitial1;
+	arg2 = Hinitial2;
+	sha256_be_round( arg1, arg2 );
 }
 
 #ifdef _SHA_256_N_
@@ -154,7 +168,6 @@ void main() {
 	// Process each block
 	for (uint i = 0; i < N; ++i){
 		// Initialise an empty block
-		uint M[SHA256_MESSAGE_BLOCK_WC];
 		for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w){
 			M[w] = 0U;
 		}
@@ -260,7 +273,44 @@ void main() {
 }
 #endif // _SHA_256_N_
 
-#ifdef _SHA_256_2_
+#ifdef _SHA_256_2_BE_
 void main() {
+
+	// Set the initial hash values
+	uvec4 H1 = Hinitial1;
+	uvec4 H2 = Hinitial2;
+
+	// Prep and process the first message block
+	uint u, v, w;
+	for (u = 0, v = 0, w = gl_GlobalInvocationID.x; u < SHA256_WC; ++u, ++v){
+		M[v] = leaf[w].data[u];
+	}
+	for (u = 0, w += 1; u < SHA256_WC; ++u, ++v){
+		M[v] = leaf[w].data[u];
+	}
+	sha256_be_round( H1, H2 );
+
+	// Prep and process the second message block
+	for (u = 1; u < (SHA256_MESSAGE_BLOCK_WC-1); ++u){
+		M[u] = 0U;
+	}
+	M[0] = 0x80000000;
+	M[SHA256_MESSAGE_BLOCK_WC-1] = 512;
+	sha256_be_round( H1, H2 );
+
+	// Apply the second round of hashing
+	sha256_be_1( H1, H2 );
+
+	// Output the result
+	w = gl_GlobalInvocationID.x;
+	const uint wc = (SHA256_WC / 2);
+	for (u = 0; u < wc; ++u){
+		leaf[w].data[u] = H1[u];
+		//debugPrintfEXT("%u => %08x, %08x\n", u, H1[u], leaf[w].data[u]);
+	}
+	for (v = 0; v < wc; ++u, ++v){
+		leaf[w].data[u] = H2[v];
+		//debugPrintfEXT("%u => %08x, %08x\n", u, H2[v], leaf[w].data[u]);
+	}
 }
-#endif // _SHA_256_2_
+#endif // _SHA_256_2_BE_

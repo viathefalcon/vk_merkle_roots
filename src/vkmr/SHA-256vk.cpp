@@ -219,28 +219,32 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
     IVkSha256DInstance( name ),
     m_device( move( device ) ) {
 
-    m_pipeline = Mapping::Pipeline( m_device );
-    m_mapping = Mapping( *m_device, m_device.AllocateDescriptorSet( m_pipeline ), m_device.AllocateCommandBuffer( ) );
+    m_mapping_pipeline = Mapping::Pipeline( m_device );
+    m_mapping = Mapping( *m_device, m_device.AllocateDescriptorSet( m_mapping_pipeline ), m_device.AllocateCommandBuffer( ) );
     m_batch = Batch::New( m_device, 256 * 1024 * 1024 );
     m_slice = slice_type::New( m_device, 256 * 1024 * 1024 );
+    m_reduction_pipeline = Reduction::Pipeline( m_device );
+    m_reduction = Reduction( *m_device, m_device.AllocateDescriptorSet( m_reduction_pipeline ), m_device.AllocateCommandBuffer( ) );
 }
 
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( move( instance.m_device ) ),
+    m_mapping_pipeline( move( instance.m_mapping_pipeline ) ),
     m_mapping( move( instance.m_mapping ) ),
-    m_pipeline( move( instance.m_pipeline ) ),
     m_batch( move( instance.m_batch ) ),
     m_slice( move( instance.m_slice ) ),
+    m_reduction_pipeline( move( instance.m_reduction_pipeline ) ),
     m_reduction( move( instance.m_reduction ) ) {
 }
 
 VkSha256D::Instance::~Instance() {
 
-    m_pipeline = Pipeline( );
+    m_mapping_pipeline = Pipeline( );
     m_mapping = Mapping( );
     m_batch = Batch( );
     m_slice = slice_type( );
+    m_reduction_pipeline = Pipeline( );
     m_reduction = Reduction( );
 }
 
@@ -248,10 +252,11 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
     m_name = instance.Name( );
     m_device = move( instance.m_device );
+    m_mapping_pipeline = move( instance.m_mapping_pipeline );
     m_mapping = move( instance.m_mapping );
-    m_pipeline = move( instance.m_pipeline );
     m_batch = move( instance.m_batch );
     m_slice = move( instance.m_slice );
+    m_reduction_pipeline = move( instance.m_reduction_pipeline );
     m_reduction = move( instance.m_reduction );
     return (*this);
 }
@@ -269,7 +274,7 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     }
 
     // Apply the mapping from the batch to the slice
-    m_mapping.Apply( m_batch, m_slice, m_pipeline );
+    m_mapping.Apply( m_batch, m_slice, m_mapping_pipeline );
     if (!m_mapping){
         // Ack
         cerr << "Failed to apply the mapping with error: " << static_cast<int64_t>( static_cast<VkResult>( m_mapping ) ) << endl;
@@ -282,7 +287,7 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     }
 
     // Apply the reduction
-    m_reduction.Apply( m_slice, m_device );
+    m_reduction.Apply( m_slice, m_device, m_reduction_pipeline );
     if (!m_reduction){
         // Ack
         cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( static_cast<VkResult>( m_reduction ) ) << endl;

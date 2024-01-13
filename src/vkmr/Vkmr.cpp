@@ -89,6 +89,7 @@ int main(int argc, const char* argv[]) {
 
     vkmr::CpuSha256D mrc;
 #if defined (VULKAN_SUPPORT)
+    cout << "Initializing.." << endl;
     vkmr::VkSha256D instances;
 #endif
 

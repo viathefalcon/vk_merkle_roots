@@ -314,14 +314,16 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
         m_vkResult = ::vkCreateCommandPool( m_vkDevice, &vkCommandPoolCreateInfo, pAllocator, &m_vkCommandPool );
     }
     if (m_vkResult == VK_SUCCESS){
+        const uint32_t setCount = 2;
+
         // Create the descriptor pool
         VkDescriptorPoolSize vkDescriptorPoolSize = {};
         vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        vkDescriptorPoolSize.descriptorCount = 6; // This is the total number, *across* descriptor sets allocated from the pool
+        vkDescriptorPoolSize.descriptorCount = (3 + 1) * setCount; // This is the total number, *across* descriptor sets allocated from the pool
         VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo = {};
         vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         vkDescriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        vkDescriptorPoolCreateInfo.maxSets = 2;
+        vkDescriptorPoolCreateInfo.maxSets = setCount;
         vkDescriptorPoolCreateInfo.poolSizeCount = 1;
         vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
         m_vkResult = ::vkCreateDescriptorPool( m_vkDevice, &vkDescriptorPoolCreateInfo, pAllocator, &m_vkDescriptorPool );
