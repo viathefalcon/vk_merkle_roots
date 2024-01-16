@@ -14,6 +14,7 @@
 // C++ Standard Headers
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 #if defined (VULKAN_SUPPORT)
 // Vulkan Headers
@@ -34,7 +35,6 @@ PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperti
 PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
-using ::std::move;
 
 // Class(es)
 //
@@ -154,7 +154,7 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
             if (static_cast<VkResult>( device ) == VK_SUCCESS){
                 // Wrap up and accumulate
                 const auto name = ::std::string( vkPhysicalDeviceProperties.deviceName );
-                m_instances.push_back( Instance( name, move( device ) ) );
+                m_instances.push_back( Instance( name, ::std::move( device ) ) );
                 continue;
             }
             ::std::cerr << "Failed to create a logical compute device on Vulkan" << std::endl;
@@ -217,7 +217,7 @@ void VkSha256D::ForEach(::std::function<void(Instance&)> lambda) {
 
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
-    m_device( move( device ) ) {
+    m_device( ::std::move( device ) ) {
 
     m_mapping_pipeline = Mapping::Pipeline( m_device );
     m_mapping = Mapping( *m_device, m_device.AllocateDescriptorSet( m_mapping_pipeline ), m_device.AllocateCommandBuffer( ) );
@@ -229,13 +229,13 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
 
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
-    m_device( move( instance.m_device ) ),
-    m_mapping_pipeline( move( instance.m_mapping_pipeline ) ),
-    m_mapping( move( instance.m_mapping ) ),
-    m_batch( move( instance.m_batch ) ),
-    m_slice( move( instance.m_slice ) ),
-    m_reduction_pipeline( move( instance.m_reduction_pipeline ) ),
-    m_reduction( move( instance.m_reduction ) ) {
+    m_device( ::std::move( instance.m_device ) ),
+    m_mapping_pipeline( ::std::move( instance.m_mapping_pipeline ) ),
+    m_mapping( ::std::move( instance.m_mapping ) ),
+    m_batch( ::std::move( instance.m_batch ) ),
+    m_slice( ::std::move( instance.m_slice ) ),
+    m_reduction_pipeline( ::std::move( instance.m_reduction_pipeline ) ),
+    m_reduction( ::std::move( instance.m_reduction ) ) {
 }
 
 VkSha256D::Instance::~Instance() {
@@ -251,13 +251,13 @@ VkSha256D::Instance::~Instance() {
 VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instance) {
 
     m_name = instance.Name( );
-    m_device = move( instance.m_device );
-    m_mapping_pipeline = move( instance.m_mapping_pipeline );
-    m_mapping = move( instance.m_mapping );
-    m_batch = move( instance.m_batch );
-    m_slice = move( instance.m_slice );
-    m_reduction_pipeline = move( instance.m_reduction_pipeline );
-    m_reduction = move( instance.m_reduction );
+    m_device = ::std::move( instance.m_device );
+    m_mapping_pipeline = ::std::move( instance.m_mapping_pipeline );
+    m_mapping = ::std::move( instance.m_mapping );
+    m_batch = ::std::move( instance.m_batch );
+    m_slice = ::std::move( instance.m_slice );
+    m_reduction_pipeline = ::std::move( instance.m_reduction_pipeline );
+    m_reduction = ::std::move( instance.m_reduction );
     return (*this);
 }
 

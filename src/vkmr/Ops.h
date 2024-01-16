@@ -31,7 +31,7 @@ public:
     Mapping& Apply(Batch&, Slice<VkSha256Result>&, vkmr::Pipeline&);
     VkResult Dispatch(VkQueue);
 
-    static Pipeline Pipeline(ComputeDevice&);
+    static vkmr::Pipeline Pipeline(ComputeDevice&);
 
 private:
     void Reset(void);
@@ -63,7 +63,7 @@ public:
     Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, vkmr::Pipeline&);
     VkResult Dispatch(VkQueue);
 
-    static Pipeline Pipeline(ComputeDevice&);
+    static vkmr::Pipeline Pipeline(ComputeDevice&);
 
 private:
     void Free(void);

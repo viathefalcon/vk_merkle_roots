@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <fstream>
+#include <utility>
 
 // Declarations
 #include "Ops.h"
@@ -23,7 +24,6 @@
 extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
-using ::std::move;
 
 // Classes
 //
@@ -31,8 +31,8 @@ Mapping::Mapping(Mapping&& mapping):
     m_vkResult( mapping.m_vkResult ),
     m_vkDevice( mapping.m_vkDevice ),
     m_vkFence( mapping.m_vkFence ),
-    m_descriptorSet( move( mapping.m_descriptorSet ) ),
-    m_commandBuffer( move( mapping.m_commandBuffer ) ) {
+    m_descriptorSet( ::std::move( mapping.m_descriptorSet ) ),
+    m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ) {
     
     mapping.Reset( );
 }
@@ -41,8 +41,8 @@ Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
-    m_descriptorSet( move( descriptorSet ) ),
-    m_commandBuffer( move( commandBuffer ) ) {
+    m_descriptorSet( ::std::move( descriptorSet ) ),
+    m_commandBuffer( ::std::move( commandBuffer ) ) {
 
     // Create the fence
     VkFenceCreateInfo vkFenceCreateInfo = {};
@@ -58,8 +58,8 @@ Mapping& Mapping::operator=(Mapping&& mapping) {
         m_vkResult = mapping.m_vkResult;
         m_vkDevice = mapping.m_vkDevice;
         m_vkFence = mapping.m_vkFence;
-        m_descriptorSet = move( mapping.m_descriptorSet );
-        m_commandBuffer = move( mapping.m_commandBuffer );
+        m_descriptorSet = ::std::move( mapping.m_descriptorSet );
+        m_commandBuffer = ::std::move( mapping.m_commandBuffer );
 
         mapping.Reset( );
     }
@@ -173,7 +173,7 @@ void Mapping::Release(void) {
     Reset( );
 }
 
-Pipeline Mapping::Pipeline(ComputeDevice& device) {
+vkmr::Pipeline Mapping::Pipeline(ComputeDevice& device) {
 
     // Look for an early out
     auto vkDevice = *device;
@@ -239,8 +239,8 @@ Reduction::Reduction(Reduction&& reduction):
     m_count( reduction.m_count ),
     m_vkBufferHost( reduction.m_vkBufferHost ),
     m_vkHostMemory( reduction.m_vkHostMemory ),
-    m_descriptorSet( move( reduction.m_descriptorSet ) ),
-    m_commandBuffer( move( reduction.m_commandBuffer ) ) {
+    m_descriptorSet( ::std::move( reduction.m_descriptorSet ) ),
+    m_commandBuffer( ::std::move( reduction.m_commandBuffer ) ) {
     reduction.Reset( );
 }
 
@@ -252,8 +252,8 @@ Reduction::Reduction(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBu
     m_vkFence( VK_NULL_HANDLE ),
     m_vkBufferHost( VK_NULL_HANDLE ),
     m_vkHostMemory( VK_NULL_HANDLE ),
-    m_descriptorSet( move( descriptorSet ) ),
-    m_commandBuffer( move( commandBuffer ) ) {
+    m_descriptorSet( ::std::move( descriptorSet ) ),
+    m_commandBuffer( ::std::move( commandBuffer ) ) {
 
     // Create the fence
     VkFenceCreateInfo vkFenceCreateInfo = {};
@@ -273,8 +273,8 @@ Reduction& Reduction::operator=(Reduction&& reduction) {
         m_vkFence = reduction.m_vkFence;
         m_vkBufferHost = reduction.m_vkBufferHost;
         m_vkHostMemory = reduction.m_vkHostMemory;
-        m_descriptorSet = move( reduction.m_descriptorSet );
-        m_commandBuffer = move( reduction.m_commandBuffer );
+        m_descriptorSet = ::std::move( reduction.m_descriptorSet );
+        m_commandBuffer = ::std::move( reduction.m_commandBuffer );
 
         reduction.Reset( );
     }
@@ -444,7 +444,7 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     return m_vkResult;
 }
 
-Pipeline Reduction::Pipeline(ComputeDevice& device) {
+vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
 
     // Look for an early out
     auto vkDevice = *device;

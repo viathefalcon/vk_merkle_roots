@@ -22,7 +22,7 @@
             "name": "OnDeck",
             "includePath": ["${workspaceFolder}/**", "/home/deck/Workspaces/Libraries/Vulkan/x86_64/include"],
             "defines": ["_ONDECK_"],
-            "compilerPath": "/usr/lib/sdk/llvm14/bin/clang++",
+            "compilerPath": "/usr/lib/sdk/llvm16/bin/clang++",
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "clang-x64"
