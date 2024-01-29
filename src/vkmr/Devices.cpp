@@ -151,21 +151,16 @@ Pipeline::Pipeline(Pipeline&& pipeline):
     pipeline.Reset( );
 }
 
-Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescriptorSetLayout vkDescriptorSetLayout):
+Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescriptorSetLayout vkDescriptorSetLayout, VkPipelineLayout vkPipelineLayout):
     m_vkDevice( vkDevice ),
     m_vkShaderModule( vkShaderModule ),
     m_vkDescriptorSetLayout( vkDescriptorSetLayout ),
-    m_vkPipelineLayout( VK_NULL_HANDLE ),
+    m_vkPipelineLayout( vkPipelineLayout ),
     m_vkPipeline( VK_NULL_HANDLE ) {
 
-    // Create the pipeline layout
-    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
-    VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
-    vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    vkPipelineLayoutCreateInfo.setLayoutCount = 1;
-    vkPipelineLayoutCreateInfo.pSetLayouts = &m_vkDescriptorSetLayout;
-    VkResult vkResult = ::vkCreatePipelineLayout( m_vkDevice, &vkPipelineLayoutCreateInfo, pAllocator, &m_vkPipelineLayout );
-    if (vkResult != VK_SUCCESS){
+    // Check the pipeline layout
+    if (m_vkPipelineLayout == VK_NULL_HANDLE){
+        // Bail
         Release( );
         return;
     }
@@ -180,7 +175,7 @@ Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescripto
     vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
     vkComputePipelineCreateInfo.layout = m_vkPipelineLayout;
-    vkResult = ::vkCreateComputePipelines( m_vkDevice, 0, 1, &vkComputePipelineCreateInfo, pAllocator, &m_vkPipeline );
+    VkResult vkResult = ::vkCreateComputePipelines( m_vkDevice, 0, 1, &vkComputePipelineCreateInfo, VK_NULL_HANDLE, &m_vkPipeline );
     if (vkResult != VK_SUCCESS){
         Release( );
         return;
@@ -201,6 +196,17 @@ Pipeline& Pipeline::operator=(Pipeline&& pipeline) {
         pipeline.Reset( );
     }
     return (*this);
+}
+
+VkPipelineLayout Pipeline::DefaultLayout(VkDevice vkDevice, VkDescriptorSetLayout vkDescriptorSetLayout) {
+
+    VkPipelineLayout vkPipelineLayout = VK_NULL_HANDLE;
+    VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
+    vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    vkPipelineLayoutCreateInfo.setLayoutCount = 1;
+    vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout;
+    VkResult vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
+    return (vkResult == VK_SUCCESS) ? vkPipelineLayout : VK_NULL_HANDLE;
 }
 
 void Pipeline::Reset(void) {

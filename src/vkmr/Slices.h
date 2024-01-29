@@ -95,7 +95,7 @@ public:
             VkBufferCreateInfo vkBufferCreateInfo = {};
             vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
             vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            vkBufferCreateInfo.usage = c_vkBufferUsageFlags;
             vkBufferCreateInfo.size = (m_reserved * sizeof( T ));
             VkResult vkResult = ::vkCreateBuffer(
                 m_vkDevice,
@@ -112,7 +112,7 @@ public:
                     (m_sliced * sizeof( T ))
                 );
             }else{
-                ::vkDestroyBuffer( m_vkDevice, vkBuffer, pAllocator );
+                vkBuffer = VK_NULL_HANDLE;
             }
             if (vkResult == VK_SUCCESS){
                 slice = Slice( m_vkDevice, vkBuffer, VK_NULL_HANDLE, vkBufferCreateInfo.size );
@@ -120,6 +120,8 @@ public:
                 // Update our own internal state
                 m_sliced += m_reserved;
                 m_reserved = 0U;
+            }else if (vkBuffer != VK_NULL_HANDLE){
+                ::vkDestroyBuffer( m_vkDevice, vkBuffer, pAllocator );
             }
         }
         return slice;
@@ -194,7 +196,7 @@ public:
             VkBufferCreateInfo vkBufferCreateInfo = {};
             vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
             vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            vkBufferCreateInfo.usage = c_vkBufferUsageFlags;
             vkBufferCreateInfo.size = vkSliceSize;
             VkResult vkResult = ::vkCreateBuffer(
                 vkDevice,
@@ -258,6 +260,8 @@ private:
     VkDeviceMemory m_vkDeviceMemory;
     VkDeviceSize m_vkSize;
     size_t m_sliced, m_reserved, m_capacity;
+
+    static const VkBufferUsageFlags c_vkBufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 };
 
 } // namespace vkmr

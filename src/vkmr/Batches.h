@@ -1,4 +1,4 @@
-// Batches.h: declares the types, functions and classes that slices memory for inputs
+// Batches.h: declares the types, functions and classes that batch (user/caller) inputs
 //
 
 #ifndef __VKMR_BATCHES_H__

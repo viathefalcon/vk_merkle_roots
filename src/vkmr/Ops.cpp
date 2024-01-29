@@ -227,7 +227,7 @@ vkmr::Pipeline Mapping::Pipeline(ComputeDevice& device) {
 
     // Wrap it all up, maybe
     return (vkResult == VK_SUCCESS)
-        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout )
+        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkmr::Pipeline::DefaultLayout( vkDevice, vkDescriptorSetLayout ) )
         : vkmr::Pipeline( );
 }
 
@@ -283,19 +283,6 @@ Reduction& Reduction::operator=(Reduction&& reduction) {
 
 Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device, vkmr::Pipeline& pipeline) {
 
-    // Update the descriptor set
-    const auto sliceBufferDescriptor = slice.BufferDescriptor( );
-    VkWriteDescriptorSet vkWriteDescriptorSet = {};
-    vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    vkWriteDescriptorSet.dstSet = *m_descriptorSet;
-    vkWriteDescriptorSet.descriptorCount = 1;
-    vkWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    vkWriteDescriptorSet.pBufferInfo = &(sliceBufferDescriptor);
-    VkWriteDescriptorSet vkWriteDescriptorSets[] = {
-        vkWriteDescriptorSet
-    };
-    ::vkUpdateDescriptorSets( m_vkDevice, 1, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
-
     // Release any previously-held memory
     this->Free( );
 
@@ -343,6 +330,19 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
         m_vkResult = ::vkBindBufferMemory( m_vkDevice, m_vkBufferHost, m_vkHostMemory, 0U );
     }
     if (m_vkResult == VK_SUCCESS){
+        // Update the descriptor set (to point at the slice's buffer)
+        const auto sliceBufferDescriptor = slice.BufferDescriptor( );
+        VkWriteDescriptorSet vkWriteDescriptorSet = {};
+        vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        vkWriteDescriptorSet.dstSet = *m_descriptorSet;
+        vkWriteDescriptorSet.descriptorCount = 1;
+        vkWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        vkWriteDescriptorSet.pBufferInfo = &(sliceBufferDescriptor);
+        VkWriteDescriptorSet vkWriteDescriptorSets[] = {
+            vkWriteDescriptorSet
+        };
+        ::vkUpdateDescriptorSets( m_vkDevice, 1, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
+
         // Get the command buffer
         auto vkCommandBuffer = *m_commandBuffer;
 
@@ -356,17 +356,93 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
             VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
             ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
-            // Actually dispatch the shader invocations
-            ::vkCmdDispatch( vkCommandBuffer, (m_count / 2), 1, 1 );
+            // Loop until we've reduced the number of elements to 1
+            for (uint pass = 0U, count = m_count; count > 1U; ){
+                const uint delta = (1 << pass);
 
+                // Shader only operates on pairs, so the group count
+                // for every pass must be even
+                if ((count % 2) != 0){
+                    // If this is not the first iteration, then we need
+                    // a barrier between the last shader invocation and
+                    // the copy we're about to do
+                    if (pass > 0U){
+                        VkMemoryBarrier2KHR vkMemoryBarrier = {};
+                        vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                        vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+                        vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+                        vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
+                        vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+                        VkDependencyInfoKHR vkDependencyInfo = {};
+                        vkDependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                        vkDependencyInfo.memoryBarrierCount = 1;
+                        vkDependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+                        g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
+                    }
+
+                    // Duplicate the last element
+                    VkBufferCopy vkBufferCopy = {};
+                    vkBufferCopy.size = sizeof( Slice<VkSha256Result>::value_type );
+                    vkBufferCopy.srcOffset = vkBufferCopy.size * (count - 1U) * delta;
+                    vkBufferCopy.dstOffset = vkBufferCopy.srcOffset + (vkBufferCopy.size * delta);
+                    if ((vkBufferCopy.dstOffset + vkBufferCopy.size) > slice.Size( )){
+                        // The copy would overflow the slice's memory - bail
+                        m_vkResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                        break;
+                    }
+                    ::vkCmdCopyBuffer( vkCommandBuffer, slice.Buffer( ), slice.Buffer( ), 1, &vkBufferCopy );
+                    //std::cout << "Duplicating item at " << int64_t(vkBufferCopy.srcOffset) << " to " << int64_t(vkBufferCopy.dstOffset) << "; count == " << count << ", delta == " << delta << std::endl;
+                    count += 1U;
+
+                    // Now we need a barrier between the copy and the shader invocation, below
+                    VkMemoryBarrier2KHR vkMemoryBarrier = {};
+                    vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                    vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
+                    vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR;
+                    vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+                    vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+                    VkDependencyInfoKHR vkDependencyInfo = {};
+                    vkDependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    vkDependencyInfo.memoryBarrierCount = 1;
+                    vkDependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+                    g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
+                }else if (pass > 0U){
+                    // Inject a barrier between shader invocations
+                    VkMemoryBarrier2KHR vkMemoryBarrier = {};
+                    vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                    vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+                    vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+                    vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+                    vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+                    VkDependencyInfoKHR vkDependencyInfo = {};
+                    vkDependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    vkDependencyInfo.memoryBarrierCount = 1;
+                    vkDependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
+                    g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
+                }
+
+                // Push the constants
+                struct {
+                    uint pass, delta;
+                } pc;
+                pc.pass = (++pass);
+                pc.delta = delta;
+                ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
+
+                // Actually dispatch the shader invocations
+                count >>= 1;
+                ::vkCmdDispatch( vkCommandBuffer, count, 1, 1 );
+            }
+        }
+        if (m_vkResult == VK_SUCCESS){
             // Insert a barrier such that the writes from the shader complete
             // before we try and copy back to host-mappable memory
             VkMemoryBarrier2KHR vkMemoryBarrier = {};
             vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
             vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
             vkMemoryBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-            vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
-            vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT_KHR;
+            vkMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
+            vkMemoryBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
             VkDependencyInfoKHR vkDependencyInfo = {};
             vkDependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             vkDependencyInfo.memoryBarrierCount = 1;
@@ -375,10 +451,8 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
 
             // Add the command to copy from the slice buffer to the one we've allocated
             VkBufferCopy vkBufferCopy = {};
-            vkBufferCopy.size = m_vkSize;
+            vkBufferCopy.size = sizeof( VkSha256Result );
             ::vkCmdCopyBuffer( vkCommandBuffer, slice.Buffer( ), m_vkBufferHost, 1, &vkBufferCopy );
-        }
-        if (m_vkResult == VK_SUCCESS){
             m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
         }
     }
@@ -421,7 +495,7 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     if (m_vkResult == VK_SUCCESS){
         // Iterate the results (🤞)
         const auto pResults = static_cast<uint8_t*>( pMapped );
-        for (decltype(m_count) counter = 0; counter < m_count; ++counter){
+        for (decltype(m_count) counter = 0U; counter < 1U; ++counter){
             const VkDeviceSize vkOffset = sizeof( VkSha256Result ) * counter;
 
             // Get the next result
@@ -490,9 +564,27 @@ vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
         vkResult = ::vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &vkDescriptorSetLayout );
     }
 
+    // Create the pipeline layout
+    VkPipelineLayout vkPipelineLayout = VK_NULL_HANDLE;
+    if (vkResult == VK_SUCCESS){
+        // c.f. https://docs.vulkan.org/guide/latest/push_constants.html
+        VkPushConstantRange vkPushConstantRange = {};
+        vkPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        vkPushConstantRange.offset = 0;
+        vkPushConstantRange.size = sizeof( uint ) + sizeof( uint );
+
+        VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
+        vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        vkPipelineLayoutCreateInfo.setLayoutCount = 1;
+        vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout;
+        vkPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+        vkPipelineLayoutCreateInfo.pPushConstantRanges = &vkPushConstantRange;
+        vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
+    }
+
     // Wrap it all up, maybe
     return (vkResult == VK_SUCCESS)
-        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout )
+        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout )
         : vkmr::Pipeline( );
 }
 

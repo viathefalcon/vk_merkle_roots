@@ -37,3 +37,6 @@
 
 # Compiled Shaders
 *.spv
+
+# Miscellaneous binary files
+*.bin

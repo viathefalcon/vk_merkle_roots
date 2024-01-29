@@ -91,7 +91,7 @@ typedef struct {
 // Encapsulates a pipeline
 class Pipeline {
 public:
-    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout);
+    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout);
     Pipeline(Pipeline&&);
     Pipeline(Pipeline const&) = delete;
 
@@ -106,6 +106,8 @@ public:
 
     VkDescriptorSetLayout DescriptorSetLayout(void) const { return m_vkDescriptorSetLayout; }
     VkPipelineLayout Layout(void) const { return m_vkPipelineLayout; }
+
+    static VkPipelineLayout DefaultLayout(VkDevice, VkDescriptorSetLayout);
 
 private:
     void Reset(void);

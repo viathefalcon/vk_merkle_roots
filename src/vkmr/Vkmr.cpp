@@ -81,6 +81,11 @@ std::string get(void) {
     return str;
 }
 
+// Evaulates to true if there (might be) another input string
+bool has(void) {
+    return !feof( stdin );
+}
+
 // Gives the entry-point for the application
 int main(int argc, const char* argv[]) {
 
@@ -94,10 +99,12 @@ int main(int argc, const char* argv[]) {
 #endif
 
     // Loop over the inputs
-    while (true) {
+    auto counter = 0U, sum = 0U;
+    while (has( )){
         const auto arg = get( );
         if (arg.empty( )){
-            break;
+            std::cerr << "Read an empty string?" << endl;
+            continue;
         }
 
 #if defined (VULKAN_SUPPORT)
@@ -107,14 +114,21 @@ int main(int argc, const char* argv[]) {
         } );
 #endif
 
+        /*
         const auto hashed = vkmr::cpu_sha256d( arg );
         cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
+        */
 
         if (!mrc.Add( std::move( arg ) )){
+            std::cerr << "Failed to accumulate \"" << arg << "\"" << std::endl;
             break;
         }
+
+        // Update the stats
+        ++counter;
+        sum += arg.size( );
     }
-    cout << "Root => " << print_bytes( mrc.Root( ) ).str( ) << endl;
+    cout << "Root (of " << counter << " item(s), " << sum << " byte(s)) => " << print_bytes( mrc.Root( ) ).str( ) << endl;
 #if defined (VULKAN_SUPPORT)
     instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
         cout << instance.Name( ) << ":" << endl;

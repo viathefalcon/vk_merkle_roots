@@ -73,7 +73,7 @@ private:
     VkResult m_vkResult;
     VkDevice m_vkDevice;
     VkDeviceSize m_vkSize;
-    size_t m_count;
+    uint m_count;
 
     VkFence m_vkFence;
     VkBuffer m_vkBufferHost;

@@ -24,8 +24,8 @@
 
 // Implicitly, this means that this implementation can only work 
 // on inputs which are 2^32 bytes long..
-#define MB_SIZE_BE_TOP(bytes)	    	(((bytes) & 0xE0000000) >> 29)
-#define MB_SIZE_BE_BOTTOM(bytes)	    SWOP_ENDS_U32( (bytes) << 3 )
+#define MB_SIZE_TOP(bytes)				((bytes) & 0xE0000000)
+#define MB_SIZE_BOTTOM(bytes)			((bytes) << 3)
 
 #define SHA256_MESSAGE_BLOCK_BYTE_SIZE	(512 >> 3)
 #define SHA256_MESSAGE_BLOCK_WC			(SHA256_MESSAGE_BLOCK_BYTE_SIZE >> 2)
