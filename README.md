@@ -6,7 +6,7 @@ A program to demonstrate the calculation/resolution of the roots of [Merkle/hash
 ## Building
 The Visual Studio Code project includes tasks which will build the programs; it assumes that either the Visual C++ compiler (on Windows) or Clang (elsewhere) is on the `PATH`.
 
-## Usage
+## Components
 ### `vkmr`
 This is the primary program; it reads length-delimited inputs from `stdin` and then calculates their Merkle root, both on the CPU and on each compute-capable GPU reported by Vulkan.
 
