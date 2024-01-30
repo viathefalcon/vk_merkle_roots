@@ -5,10 +5,10 @@
 //
 
 #define SWOP_ENDS_U32(x) \
-	(((x) >> 24) & 0x000000FF) | \
-	(((x) >> 8) & 0x0000FF00) | \
-	(((x) << 8) & 0x00FF0000) | \
-	(((x) << 24) & 0xFF000000)
+    (((x) >> 24) & 0x000000FF) | \
+    (((x) >> 8) & 0x0000FF00) | \
+    (((x) << 8) & 0x00FF0000) | \
+    (((x) << 24) & 0xFF000000)
 
 #define SHR(n,x) (((x) & 0xFFFFFFFF) >> (n))
 
@@ -24,12 +24,12 @@
 
 // Implicitly, this means that this implementation can only work 
 // on inputs which are 2^32 bytes long..
-#define MB_SIZE_TOP(bytes)				((bytes) & 0xE0000000)
-#define MB_SIZE_BOTTOM(bytes)			((bytes) << 3)
+#define MB_SIZE_TOP(bytes)               ((bytes) & 0xE0000000)
+#define MB_SIZE_BOTTOM(bytes)            ((bytes) << 3)
 
-#define SHA256_MESSAGE_BLOCK_BYTE_SIZE	(512 >> 3)
-#define SHA256_MESSAGE_BLOCK_WC			(SHA256_MESSAGE_BLOCK_BYTE_SIZE >> 2)
-#define SHA256_WC						8
+#define SHA256_MESSAGE_BLOCK_BYTE_SIZE   (512 >> 3)
+#define SHA256_MESSAGE_BLOCK_WC          (SHA256_MESSAGE_BLOCK_BYTE_SIZE >> 2)
+#define SHA256_WC                        8
 
 // Types
 //
@@ -41,7 +41,7 @@ typedef uint32_t uint;
 #endif
 
 struct VkSha256Result {
-	uint data[SHA256_WC];
+    uint data[SHA256_WC];
 };
 
 struct VkSha256Metadata {

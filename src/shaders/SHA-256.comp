@@ -2,8 +2,8 @@
 #extension GL_EXT_debug_printf : enable
 
 //
-// SHA-256-n.comp:	a compute shader for calculating SHA-256 hashes of inputs
-//					of arbitrary lengths (hence the 'n' suffice)
+// SHA-256-n.comp: a compute shader for calculating SHA-256 hashes of inputs
+//                 of arbitrary lengths (hence the 'n' suffice)
 //
 
 // Includes
@@ -28,12 +28,12 @@
 #ifdef _SHA_256_N_
 layout(std430, set = 0, binding = 0) readonly buffer inputs
 {
-	uint data[];
+    uint data[];
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer metadatas
 {
-	VkSha256Metadata metadata[];
+    VkSha256Metadata metadata[];
 };
 
 layout(std430, set = 0, binding = 2) writeonly buffer results
@@ -49,7 +49,7 @@ layout(std430, set = 0, binding = 0) buffer leaves
 };
 
 layout(push_constant, std430) uniform pc {
-	uint pass;
+    uint pass;
     uint delta;
 };
 #endif // _SHA_256_2_BE_
@@ -89,225 +89,231 @@ const uvec4 Hinitial2 = uvec4( 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 );
 // Holds the current message block
 uint M[SHA256_MESSAGE_BLOCK_WC];
 
+// Holds the current working block
+uint W[64];
+
 // Functions
 //
 
-// Performs a single round of SHA-256 hashing on big-endian inputs
+void sha256_computation(uint t, inout uvec4 h1, inout uvec4 h2) {
+    const uint T1 = h2.w + Sigma1( h2.x ) + Ch3( h2 ) + c_constants[t] + W[t];
+    const uint T2 = Sigma0( h1.x ) + Maj3( h1 );
+
+    h2 = h2.xxyz;
+    h2.x = h1.w + T1;
+
+    h1 = h1.xxyz;
+    h1.x = T1 + T2;
+}
+
+// Performs a single round of SHA-256 hashing on Big Endian inputs
 void sha256_be_round(inout uvec4 H1, inout uvec4 H2) {
 
-	// Prep the working variables
-	uvec4 h1 = H1;
-	uvec4 h2 = H2;
+    // Prep the working variables
+    uvec4 h1 = H1;
+    uvec4 h2 = H2;
 
-	// Loop
-	uint W[64];
-	for (uint t = 0; t < 64; ++t){
-		// Prep the message schedule
-		if (t < SHA256_MESSAGE_BLOCK_WC){
-			W[t] = M[t];
-		}else{
-			W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
-		}
-		const uint T1 = h2.w + Sigma1( h2.x ) + Ch3( h2 ) + c_constants[t] + W[t];
-		const uint T2 = Sigma0( h1.x ) + Maj3( h1 );
+    // Round and round we go..
+    uint t = 0;
+    for ( ; t < SHA256_MESSAGE_BLOCK_WC; ++t){
+        W[t] = M[t];
+        sha256_computation(t, h1, h2);
+    }
+    for ( ; t < 64; ++t){
+        W[t] = sigma1( W[t-2] ) + W[t-7] + sigma0( W[t-15] ) + W[t-16];
+        sha256_computation(t, h1, h2);
+    }
 
-		h2 = h2.xxyz;
-		h2.x = h1.w + T1;
-
-		h1 = h1.xxyz;
-		h1.x = T1 + T2;
-	}
-
-	// Accumulate the result
-	H1 += h1;
-	H2 += h2;
+    // Accumulate the result
+    H1 += h1;
+    H2 += h2;
 }
 
 // Computes the SHA-256 hash of the given 256-bit Big Endian input
 void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
 
-	// Initialise the message
-	uint w = 0;
-	for ( ; w < 4; ++w){
-		M[w] = arg1[w];
-	}
-	for (uint x = 0; w < 8; ++w, ++x){
-		M[w] = arg2[x];
-	}
-	for (; w < (SHA256_MESSAGE_BLOCK_WC - 1); ++w){
-		M[w] = 0U;
-	}
-	M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
-	M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
+    // Initialise the message
+    uint w = 0;
+    for ( ; w < 4; ++w){
+        M[w] = arg1[w];
+    }
+    for (uint x = 0; w < 8; ++w, ++x){
+        M[w] = arg2[x];
+    }
+    for (; w < (SHA256_MESSAGE_BLOCK_WC - 1); ++w){
+        M[w] = 0U;
+    }
+    M[(SHA256_MESSAGE_BLOCK_WC / 2)] = 0x80000000;
+    M[(SHA256_MESSAGE_BLOCK_WC - 1)] = 256;
 
-	// Do the hashing
-	arg1 = Hinitial1;
-	arg2 = Hinitial2;
-	sha256_be_round( arg1, arg2 );
+    // Do the hashing
+    arg1 = Hinitial1;
+    arg2 = Hinitial2;
+    sha256_be_round( arg1, arg2 );
 }
 
 #ifdef _SHA_256_N_
 void main() {
-	// Get the inputs
-	const uint gid = gl_GlobalInvocationID.x;
-	const uint size = metadata[gid].size;
-	const uint start = metadata[gid].start;
+    // Get the inputs
+    const uint gid = gl_GlobalInvocationID.x;
+    const uint size = metadata[gid].size;
+    const uint start = metadata[gid].start;
 
-	// Get 'N', the number of blocks
-	uint N = (size / SHA256_MESSAGE_BLOCK_BYTE_SIZE);
-	if ((size % SHA256_MESSAGE_BLOCK_BYTE_SIZE) > 0){
-		N++;
-	}
+    // Get 'N', the number of blocks
+    uint N = (size / SHA256_MESSAGE_BLOCK_BYTE_SIZE);
+    if ((size % SHA256_MESSAGE_BLOCK_BYTE_SIZE) > 0){
+        N++;
+    }
 
-	// If the supplementary block isn't large enough to
-	// accomodate the trailing size footer..
-	if (((N * SHA256_MESSAGE_BLOCK_BYTE_SIZE) - size) <= 8){
-		N++;
-	}
+    // If the supplementary block isn't large enough to
+    // accomodate the trailing size footer..
+    if (((N * SHA256_MESSAGE_BLOCK_BYTE_SIZE) - size) <= 8){
+        N++;
+    }
 
-	// Set the initial hash values
-	uvec4 H1 = Hinitial1;
-	uvec4 H2 = Hinitial2;
+    // Set the initial hash values
+    uvec4 H1 = Hinitial1;
+    uvec4 H2 = Hinitial2;
 
-	// Process each block
-	for (uint i = 0, p = start; i < N; ++i){
-		// Initialise an empty block
-		for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w){
-			M[w] = 0U;
-		}
+    // Process each block
+    for (uint i = 0, p = start; i < N; ++i){
+        // Initialise an empty block
+        for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w){
+            M[w] = 0U;
+        }
 
-		// Prep it
-		const uint offset = (i * SHA256_MESSAGE_BLOCK_BYTE_SIZE);
-		if (offset >= size){
-			if (size == offset){
-				// The size of the input is an exact multiple of
-				// the message block size, so in this, last, block
-				// we set the message padding as the first bit of
-				// the first word
-				M[0] = 0x80000000;
-			}
+        // Prep it
+        const uint offset = (i * SHA256_MESSAGE_BLOCK_BYTE_SIZE);
+        if (offset >= size){
+            if (size == offset){
+                // The size of the input is an exact multiple of
+                // the message block size, so in this, last, block
+                // we set the message padding as the first bit of
+                // the first word
+                M[0] = 0x80000000;
+            }
 
-			M[SHA256_MESSAGE_BLOCK_WC-2] = MB_SIZE_TOP( size );
-			M[SHA256_MESSAGE_BLOCK_WC-1] = MB_SIZE_BOTTOM( size );
-		}else{
-			// Get the offset to the start of the next message block, if any
-			const uint next = (offset + SHA256_MESSAGE_BLOCK_BYTE_SIZE);
-			if (next < size){
-				// Fill the message with the bytes in the current block
-				for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w, ++p){
-					M[w] = SWOP_ENDS_U32( data[p] );
-				}
-			}else{
-				// Get the number of input bytes to be copied into the current block
-				const uint outstanding = (size - offset);
+            M[SHA256_MESSAGE_BLOCK_WC-2] = MB_SIZE_TOP( size );
+            M[SHA256_MESSAGE_BLOCK_WC-1] = MB_SIZE_BOTTOM( size );
+        }else{
+            // Get the offset to the start of the next message block, if any
+            const uint next = (offset + SHA256_MESSAGE_BLOCK_BYTE_SIZE);
+            if (next < size){
+                // Fill the message with the bytes in the current block
+                for (uint w = 0; w < SHA256_MESSAGE_BLOCK_WC; ++w, ++p){
+                    M[w] = SWOP_ENDS_U32( data[p] );
+                }
+            }else{
+                // Get the number of input bytes to be copied into the current block
+                const uint outstanding = (size - offset);
 
-				// wr: the number of bytes to be filled in the last word (w1-1)
-				const uint wr = (outstanding % UINT_BYTE_SIZE);
+                // wr: the number of bytes to be filled in the last word (w1-1)
+                const uint wr = (outstanding % UINT_BYTE_SIZE);
 
-				// w1: the number of whole or partial words to be filled
-				uint w1 = (outstanding / UINT_BYTE_SIZE);
-				if (wr > 0){
-					w1 += 1;
-				}
+                // w1: the number of whole or partial words to be filled
+                uint w1 = (outstanding / UINT_BYTE_SIZE);
+                if (wr > 0){
+                    w1 += 1;
+                }
 
-				// Copy the words
-				for (uint w = 0; w < w1; ++w, ++p){
-					M[w] = SWOP_ENDS_U32( data[p] );
-				}
+                // Copy the words
+                for (uint w = 0; w < w1; ++w, ++p){
+                    M[w] = SWOP_ENDS_U32( data[p] );
+                }
 
-				// Get the number of bytes in the current block that will
-				// not be touched by the input
-				uint rem = (SHA256_MESSAGE_BLOCK_BYTE_SIZE - outstanding);
-				if (rem > 0){
-					// If we get in here, then we need to set the message-
-					// padding bit in the first byte not touched by the
-					// input.
-					// 
-					// The word to be selected is the last partially-filled
-					// one or the first one after the last fully-filled one
-					const uint w0 = (wr > 0) ? (w1 - 1) : w1;
-					uint word = M[w0];
+                // Get the number of bytes in the current block that will
+                // not be touched by the input
+                uint rem = (SHA256_MESSAGE_BLOCK_BYTE_SIZE - outstanding);
+                if (rem > 0){
+                    // If we get in here, then we need to set the message-
+                    // padding bit in the first byte not touched by the
+                    // input.
+                    // 
+                    // The word to be selected is the last partially-filled
+                    // one or the first one after the last fully-filled one
+                    const uint w0 = (wr > 0) ? (w1 - 1) : w1;
+                    uint word = M[w0];
 
-					// Raise the leading bit on the indicated byte within
-					// the word, and apply
-					const uint x = ((UINT_BYTE_SIZE - (wr+1)) << 3);
-					word |= ((0x80 << x) & (0xFF << x));
-					//debugPrintfEXT( "HERE: wr = %u, x = %u, word = %08x, M[w0] = %08x\n", wr, x, word, SWOP_ENDS_U32(word) );
-					M[w0] = word;
+                    // Raise the leading bit on the indicated byte within
+                    // the word, and apply
+                    const uint x = ((UINT_BYTE_SIZE - (wr+1)) << 3);
+                    word |= ((0x80 << x) & (0xFF << x));
+                    //debugPrintfEXT( "HERE: wr = %u, x = %u, word = %08x, M[w0] = %08x\n", wr, x, word, SWOP_ENDS_U32(word) );
+                    M[w0] = word;
 
-					// Now we have one less untouched byte..
-					rem--;
-				}else{
-					// It'll be handled in the next block..
-					;
-				}
-				if (rem >= 8){
-					// If we get in here, there is sufficient space in
-					// the current block to hold the message size, so..
-					M[SHA256_MESSAGE_BLOCK_WC-2] = MB_SIZE_TOP( size );
-					M[SHA256_MESSAGE_BLOCK_WC-1] = MB_SIZE_BOTTOM( size );
-				}
-			}
-		}
+                    // Now we have one less untouched byte..
+                    rem--;
+                }else{
+                    // It'll be handled in the next block..
+                    ;
+                }
+                if (rem >= 8){
+                    // If we get in here, there is sufficient space in
+                    // the current block to hold the message size, so..
+                    M[SHA256_MESSAGE_BLOCK_WC-2] = MB_SIZE_TOP( size );
+                    M[SHA256_MESSAGE_BLOCK_WC-1] = MB_SIZE_BOTTOM( size );
+                }
+            }
+        }
 
-		// Do the round
-		sha256_be_round( H1, H2 );
-	}
+        // Do the round
+        sha256_be_round( H1, H2 );
+    }
 
-	// Apply the second round of hashing
-	sha256_be_1( H1, H2 );
+    // Apply the second round of hashing
+    sha256_be_1( H1, H2 );
 
-	// Output the result
-	const uint wc = (SHA256_WC / 2);
-	uint s = 0;
-	for ( ; s < wc; ++s){
-		result[gid].data[s] = H1[s];
-	}
-	for (uint r = 0; r < wc; ++r, ++s){
-		result[gid].data[s] = H2[r];
-	}
+    // Output the result
+    const uint wc = (SHA256_WC / 2);
+    uint s = 0;
+    for ( ; s < wc; ++s){
+        result[gid].data[s] = H1[s];
+    }
+    for (uint r = 0; r < wc; ++r, ++s){
+        result[gid].data[s] = H2[r];
+    }
 }
 #endif // _SHA_256_N_
 
 #ifdef _SHA_256_2_BE_
 void main() {
 
-	// Who are we?
-	const uint gid = gl_GlobalInvocationID.x << pass;
+    // Who are we?
+    const uint gid = gl_GlobalInvocationID.x << pass;
 
-	// Set the initial hash values
-	uvec4 H1 = Hinitial1;
-	uvec4 H2 = Hinitial2;
+    // Set the initial hash values
+    uvec4 H1 = Hinitial1;
+    uvec4 H2 = Hinitial2;
 
-	// Prep and process the first message block
-	uint u, v, w;
-	for (u = 0, v = 0, w = gid; u < SHA256_WC; ++u, ++v){
-		M[v] = leaf[w].data[u];
-	}
-	for (u = 0, w += delta; u < SHA256_WC; ++u, ++v){
-		M[v] = leaf[w].data[u];
-	}
-	sha256_be_round( H1, H2 );
+    // Prep and process the first message block
+    uint u, v, w;
+    for (u = 0, v = 0, w = gid; u < SHA256_WC; ++u, ++v){
+        M[v] = leaf[w].data[u];
+    }
+    for (u = 0, w += delta; u < SHA256_WC; ++u, ++v){
+        M[v] = leaf[w].data[u];
+    }
+    sha256_be_round( H1, H2 );
 
-	// Prep and process the second message block
-	for (u = 1; u < (SHA256_MESSAGE_BLOCK_WC-1); ++u){
-		M[u] = 0U;
-	}
-	M[0] = 0x80000000;
-	M[SHA256_MESSAGE_BLOCK_WC-1] = 512;
-	sha256_be_round( H1, H2 );
+    // Prep and process the second message block
+    for (u = 1; u < (SHA256_MESSAGE_BLOCK_WC-1); ++u){
+        M[u] = 0U;
+    }
+    M[0] = 0x80000000;
+    M[SHA256_MESSAGE_BLOCK_WC-1] = 512;
+    sha256_be_round( H1, H2 );
 
-	// Apply the second round of hashing
-	sha256_be_1( H1, H2 );
+    // Apply the second round of hashing
+    sha256_be_1( H1, H2 );
 
-	// Output the result
-	const uint wc = (SHA256_WC / 2);
-	for (u = 0; u < wc; ++u){
-		leaf[gid].data[u] = H1[u];
-	}
-	for (v = 0; v < wc; ++u, ++v){
-		leaf[gid].data[u] = H2[v];
-		//debugPrintfEXT("%u => %08x, %08x\n", u, H2[v], leaf[w].data[u]);
-	}
+    // Output the result
+    const uint wc = (SHA256_WC / 2);
+    for (u = 0; u < wc; ++u){
+        leaf[gid].data[u] = H1[u];
+    }
+    for (v = 0; v < wc; ++u, ++v){
+        leaf[gid].data[u] = H2[v];
+        //debugPrintfEXT("%u => %08x, %08x\n", u, H2[v], leaf[w].data[u]);
+    }
 }
 #endif // _SHA_256_2_BE_
