@@ -10,15 +10,8 @@
 
 // C++ Standard Library Headers
 #include <cstring>
-
-// Other headers
-#if defined(_WIN32)
-#include <winsock.h>
-typedef u_long netlong_t;
-#else
-#include <arpa/inet.h>
-typedef socklen_t netlong_t;
-#endif
+#include <iomanip>
+#include <sstream>
 
 // Functions
 //
@@ -32,11 +25,13 @@ int main(int argc, const char* argv[]) {
         const auto arg = *(argv + i);
         const auto len = std::strlen( arg );
 
-        // Write out as a 32-bit unsigned int
-        // (in network-order)
-        const size_t nitems = 1;
-        const auto output = htonl( static_cast<netlong_t>( len ) );
-        if (fwrite( &output, sizeof( output ), nitems, stdout ) < nitems){
+        // Format into a fixed-length character string
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw( 10 ) << static_cast<unsigned>( len );
+        
+        // Write it out
+        const auto output = oss.str( );
+        if (fwrite( output.c_str( ), sizeof( decltype( output )::value_type ), output.size( ), stdout ) < output.size( )){
             // Bail
             return 1;
         }

@@ -10,17 +10,10 @@
 
 // C++ Standard Library Headers
 #include <cstdlib>
+#include <iomanip>
+#include <sstream>
 #include <iostream>
 #include <algorithm>
-
-// Other headers
-#if defined(_WIN32)
-#include <winsock.h>
-typedef u_long netlong_t;
-#else
-#include <arpa/inet.h>
-typedef socklen_t netlong_t;
-#endif
 
 // Functions
 //
@@ -30,42 +23,55 @@ int main(int argc, const char* argv[]) {
 
     // Fail safe
     if (argc < 2){
-        std::cerr << "Usage: rndm [number of outputs] [max output length]" << std::endl;
+        std::cerr << "Usage: rndm [seed] [max output size]" << std::endl;
         return 1;
     }
-    auto counter = std::atol( argv[1] );
 
-    // Read in the max output length, or set a sensible default
-    const auto max = (argc > 2) ? std::atol( argv[2] ) : 512U;
+    // Get the upper bound for the output size
+    const auto bound = std::atol( (argc > 2) ? argv[2] : argv[1] );
 
-    // Start generating/writing
-    std::srand( static_cast<unsigned>( std::time( NULL ) ) );
-    do {
-        // Get the length
-        const auto len = std::rand( ) % max;
+    // Set the seed
+    const auto seed = (argc > 2) ? std::atol( argv[1] ) : std::time( NULL );
+    std::srand( static_cast<unsigned>( seed ) );
 
+    // Start generating/writing until we've written just as much as asked for
+    for (long sum = 0U; sum < bound; ){
+        // Get the length of the next string
+        const auto len = std::rand( );
+        if (len == 0){
+            continue;
+        }
+        if ((sum + len) > bound){
+            // Can stop here
+            break;
+        }
+
+        // Format into a fixed-length character string
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw( 10 ) << static_cast<unsigned>( len );
+        
         // Write it out
-        const size_t nitems = 1;
-        const auto output = htonl( static_cast<netlong_t>( len ) );
-        if (fwrite( &output, sizeof( output ), nitems, stdout ) < nitems){
-            std::cerr << "Failed to write the length-delimiter of output #" << counter << std::endl;
-
+        const auto output = oss.str( );
+        if (fwrite( output.c_str( ), sizeof( decltype( output )::value_type ), output.size( ), stdout ) < output.size( )){
             // Bail
             return 1;
         }
         
+        // Write out the data itself
+        const size_t nchars = 1;
         const int extent = 126, offset = 32;
         for (auto written = 0U; written < len; ++written){
             const auto clamped = (offset + (std::rand( ) % (extent - offset)) );
             const auto output = static_cast<char>( clamped );
-            if (fwrite( &output, sizeof( output ), nitems, stdout ) < nitems){
-                std::cerr << "Failed to write " << output << " of " << counter << std::endl;
-
+            if (fwrite( &output, sizeof( output ), nchars, stdout ) < nchars){
                 // Bail
                 return 1;
             }
         }
+
+        // Flush and accumulate
         fflush( stdout );
-    } while (--counter > 0U);
+        sum += len;
+    }
     return 0;
 }

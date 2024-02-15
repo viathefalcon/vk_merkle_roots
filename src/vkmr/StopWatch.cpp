@@ -24,7 +24,7 @@ StopWatch::StopWatch() { }
 
 StopWatch::~StopWatch() { }
 
-bool StopWatch::start() {
+bool StopWatch::Start() {
 
 #if defined (_WIN32)
 	LARGE_INTEGER li;
@@ -42,7 +42,7 @@ bool StopWatch::start() {
 #endif
 }
 
-double StopWatch::elapsed(void) const {
+double StopWatch::Elapsed(void) const {
 
 #if defined (_WIN32)
 	LARGE_INTEGER li;

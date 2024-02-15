@@ -21,70 +21,15 @@
 #include <vector>
 #include <string>
 
-// Other headers
-#if defined(_WIN32)
-#include <winsock.h>
-#else
-#include <arpa/inet.h>
-#endif
-
 // Local Project Headers
 #include "Debug.h"
+#include "Inputs.h"
+#include "StopWatch.h"
 #include "SHA-256vk.h"
 #include "SHA-256plus.h"
 
 // Functions
 //
-
-// Returns the next input string
-std::string get(void) {
-
-    // Read in the length
-#if defined(_WIN32)
-    u_long netlong = 0;
-#else
-    socklen_t netlong = 0;
-#endif
-    std::vector<unsigned char> buffer;
-    buffer.reserve( sizeof( netlong ) );
-    do {
-        const auto input = getchar( );
-        if (input == EOF){
-            break;
-        }
-
-        // Accumulate
-        buffer.push_back( static_cast<unsigned char>( input ) );
-    } while (buffer.size( ) < sizeof( netlong ));
-    if (buffer.size( ) < sizeof( netlong )){
-        // Bail
-        return "";
-    }
-
-    // Get the bytes into the variable, and then convert
-    // from network order
-    std::memcpy( &netlong, buffer.data( ), sizeof( netlong ) );
-    const auto length = static_cast<uint32_t>( ntohl( netlong ) );
-
-    // Read in the string itself
-    std::string str;
-    str.reserve( static_cast<size_t>( length ) );
-    do {
-        const auto input = getchar( );
-        if (input == EOF){
-            break;
-        }
-
-        // Accumulate
-        str.append( 1, static_cast<char>( input ) );
-    } while (str.size( ) < static_cast<decltype(str)::size_type>( length ));
-    return str;
-}
-
-// Evaulates to true if there (might be) another input string
-bool has(void) {
-    return !feof( stdin );
-}
 
 // Gives the entry-point for the application
 int main(int argc, const char* argv[]) {
@@ -99,9 +44,9 @@ int main(int argc, const char* argv[]) {
 #endif
 
     // Loop over the inputs
-    auto counter = 0U, sum = 0U;
-    while (has( )){
-        const auto arg = get( );
+    vkmr::Input input( stdin );
+    while (input.Has( )){
+        const auto arg = input.Get( );
         if (arg.empty( )){
             std::cerr << "Read an empty string?" << endl;
             continue;
@@ -123,17 +68,21 @@ int main(int argc, const char* argv[]) {
             std::cerr << "Failed to accumulate \"" << arg << "\"" << std::endl;
             break;
         }
-
-        // Update the stats
-        ++counter;
-        sum += arg.size( );
     }
-    cout << "Root (of " << counter << " item(s), " << sum << " byte(s)) => " << print_bytes( mrc.Root( ) ).str( ) << endl;
+    if (input.Count( ) > 0U){
+        StopWatch sw;
+        sw.Start( );
+        const auto root = mrc.Root( );
+        cout << "Root (of " << input.Count( ) << " item(s), " << input.Size( ) << " byte(s)) => " << print_bytes( root ).str( ) << " in " << sw.Elapsed( ) << endl;
 #if defined (VULKAN_SUPPORT)
-    instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
-        cout << instance.Name( ) << ":" << endl;
-        instance.Root( );
-    } );
+        instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
+            cout << instance.Name( ) << ":" << endl;
+            StopWatch sw;
+            sw.Start( );
+            instance.Root( );
+            cout << "(" << sw.Elapsed( ) << ")" << endl;
+        } );
 #endif
+    }
     return 0;
 }

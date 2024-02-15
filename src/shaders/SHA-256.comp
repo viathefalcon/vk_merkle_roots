@@ -296,10 +296,10 @@ void main() {
     sha256_be_round( H1, H2 );
 
     // Prep and process the second message block
+    M[0] = 0x80000000;
     for (u = 1; u < (SHA256_MESSAGE_BLOCK_WC-1); ++u){
         M[u] = 0U;
     }
-    M[0] = 0x80000000;
     M[SHA256_MESSAGE_BLOCK_WC-1] = 512;
     sha256_be_round( H1, H2 );
 

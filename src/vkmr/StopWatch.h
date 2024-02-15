@@ -21,9 +21,9 @@ public:
 	StopWatch();
 	virtual ~StopWatch();
 
-	bool start(void);
+	bool Start(void);
 
-	double elapsed(void) const;
+	double Elapsed(void) const;
 
 private:
 #if defined (_WIN32)
