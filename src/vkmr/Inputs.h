@@ -11,6 +11,9 @@
 #include <fstream>
 #include <string>
 
+// Nearby Project Headers
+#include "../common/Utils.h"
+
 namespace vkmr {
 
 // Class(es)
@@ -20,6 +23,7 @@ class Input {
 public:
     typedef size_t size_type;
 
+    Input(void);
     Input(const std::string&);
     Input(Input&&);
     Input(FILE*, bool owner = false);
@@ -43,6 +47,9 @@ private:
     FILE* m_fp;
     bool m_owner;
     size_type m_size, m_count;
+
+    typedef unsigned delim_type;
+    const ::std::string::size_type m_delim_width;
 };
 
 } // namespace vkmr

@@ -14,4 +14,4 @@ This is the primary program; it reads length-delimited inputs from `stdin` and t
 This helper program accepts an arbitrary number of command-line arguments and writes them to a length-delimited stream in `stdout`.
 
 ### `rndm`
-This helper program generates a specified number of randomly-filled input strings and writes them to a length-delimited stream in `stdout`.
+This helper program generates a specified volume of randomly-filled input strings and writes them to a length-delimited stream in `stdout`.

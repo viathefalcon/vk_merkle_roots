@@ -39,4 +39,4 @@
 *.spv
 
 # Miscellaneous binary files
-*.bin
+bin/

@@ -15,15 +15,22 @@
 #include <iostream>
 #include <algorithm>
 
+// Nearby Project Headers
+#include "../common/Utils.h"
+
 // Functions
 //
 
 // Gives the entry-point
 int main(int argc, const char* argv[]) {
 
+    // Figure out the maximum width of the length-delimiter
+    typedef unsigned delim_type;
+    const auto delim_width = vkmr::max_string_length<delim_type>( );
+
     // Fail safe
     if (argc < 2){
-        std::cerr << "Usage: rndm [seed] [max output size]" << std::endl;
+        std::cerr << "Usage: rndm [seed] [max total size] [max element size]" << std::endl;
         return 1;
     }
 
@@ -34,10 +41,15 @@ int main(int argc, const char* argv[]) {
     const auto seed = (argc > 2) ? std::atol( argv[1] ) : std::time( NULL );
     std::srand( static_cast<unsigned>( seed ) );
 
+    // Get the maximum length of any given output string
+    const auto max = (argc > 3) ? std::atol( argv[3] ) : 0;
+
     // Start generating/writing until we've written just as much as asked for
-    for (long sum = 0U; sum < bound; ){
+    size_t count = 0U;
+    for (long sum = 0U; sum < bound; ++count ){
         // Get the length of the next string
-        const auto len = std::rand( );
+        const auto r = std::rand( );
+        const auto len = (max == 0) ? r : (r % max);
         if (len == 0){
             continue;
         }
@@ -48,8 +60,8 @@ int main(int argc, const char* argv[]) {
 
         // Format into a fixed-length character string
         std::ostringstream oss;
-        oss << std::setfill('0') << std::setw( 10 ) << static_cast<unsigned>( len );
-        
+        oss << std::setfill('0') << std::setw( delim_width ) << static_cast<delim_type>( len );
+
         // Write it out
         const auto output = oss.str( );
         if (fwrite( output.c_str( ), sizeof( decltype( output )::value_type ), output.size( ), stdout ) < output.size( )){
@@ -73,5 +85,6 @@ int main(int argc, const char* argv[]) {
         fflush( stdout );
         sum += len;
     }
+    std::cerr << "Wrote " << count << " string(s)" << std::endl;
     return 0;
 }
