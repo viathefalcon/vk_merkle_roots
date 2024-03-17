@@ -19,7 +19,7 @@ namespace vkmr {
 
 // Returns the maximum string length of a given (numeric) type
 template <typename T>
-constexpr ::std::string::size_type max_string_length(void) {
+::std::string::size_type max_string_length(void) {
 
     // Get the maximuim value and emit into a string
     ::std::ostringstream oss;
