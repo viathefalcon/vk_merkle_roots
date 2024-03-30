@@ -43,6 +43,10 @@ layout(std430, set = 0, binding = 2) writeonly buffer result_layout
 #endif // _SHA_256_N_
 
 #ifdef _SHA_256_2_BE_
+#extension GL_KHR_shader_subgroup_basic : enable
+
+layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
 layout(std430, set = 0, binding = 0) buffer leaf_layout
 {
     VkSha256Result leaf[];
@@ -51,6 +55,7 @@ layout(std430, set = 0, binding = 0) buffer leaf_layout
 layout(push_constant, std430) uniform pc {
     uint pass;
     uint delta;
+    uint bound;
 };
 #endif // _SHA_256_2_BE_
 

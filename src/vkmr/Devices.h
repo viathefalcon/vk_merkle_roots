@@ -91,7 +91,7 @@ typedef struct {
 // Encapsulates a pipeline
 class Pipeline {
 public:
-    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout);
+    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout, const VkSpecializationInfo* pSpecializationInfo = VK_NULL_HANDLE);
     Pipeline(Pipeline&&);
     Pipeline(Pipeline const&) = delete;
 

@@ -423,10 +423,11 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
 
                 // Push the constants
                 struct {
-                    uint pass, delta;
+                    uint pass, delta, bound;
                 } pc;
                 pc.pass = (++pass);
                 pc.delta = delta;
+                pc.bound = m_count;
                 ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
 
                 // Actually dispatch the shader invocations
@@ -571,7 +572,7 @@ vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
         VkPushConstantRange vkPushConstantRange = {};
         vkPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         vkPushConstantRange.offset = 0;
-        vkPushConstantRange.size = sizeof( uint ) + sizeof( uint );
+        vkPushConstantRange.size = (sizeof( uint ) * 3);
 
         VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
         vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -582,9 +583,40 @@ vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
         vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
     }
 
+    // Query for subgroup support
+    VkPhysicalDeviceSubgroupProperties subgroupProperties = {};
+    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
+    vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    vkPhysicalDeviceProperties2.pNext = &subgroupProperties;
+    device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
+
+    // Use to make the workgroup size the same as the subgroup size  
+    uint32_t subgroupSize = 1U;
+    if ((subgroupProperties.supportedOperations & VK_SHADER_STAGE_COMPUTE_BIT) != 0){
+        subgroupSize = subgroupProperties.subgroupSize;
+        ::std::cout << "Subgroups of size " << subgroupSize << " are supported." << ::std::endl;
+    }
+    uint32_t workgroupSize[3] = {subgroupSize, 1U, 1U};
+    VkSpecializationMapEntry vkSpecializationMapEntries[3] = {};
+    vkSpecializationMapEntries[0].constantID = 0;
+    vkSpecializationMapEntries[0].offset = 0;
+    vkSpecializationMapEntries[0].size = sizeof(uint32_t);
+    vkSpecializationMapEntries[1].constantID = 1;
+    vkSpecializationMapEntries[1].offset = vkSpecializationMapEntries[0].size + sizeof(uint32_t);
+    vkSpecializationMapEntries[1].size = sizeof(uint32_t);
+    vkSpecializationMapEntries[2].constantID = 2;
+    vkSpecializationMapEntries[2].offset = vkSpecializationMapEntries[1].size + sizeof(uint32_t);
+    vkSpecializationMapEntries[2].size = sizeof(uint32_t);
+    VkSpecializationInfo specializationInfo = {};
+    specializationInfo.mapEntryCount = 3;
+    specializationInfo.pMapEntries = vkSpecializationMapEntries;
+    specializationInfo.dataSize = sizeof( workgroupSize );
+    specializationInfo.pData = workgroupSize;
+
     // Wrap it all up, maybe
     return (vkResult == VK_SUCCESS)
-        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout )
+        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, &specializationInfo )
         : vkmr::Pipeline( );
 }
 

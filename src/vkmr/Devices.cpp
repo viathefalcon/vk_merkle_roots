@@ -151,7 +151,12 @@ Pipeline::Pipeline(Pipeline&& pipeline):
     pipeline.Reset( );
 }
 
-Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescriptorSetLayout vkDescriptorSetLayout, VkPipelineLayout vkPipelineLayout):
+Pipeline::Pipeline(
+    VkDevice vkDevice,
+    VkShaderModule vkShaderModule,
+    VkDescriptorSetLayout vkDescriptorSetLayout,
+    VkPipelineLayout vkPipelineLayout,
+    const VkSpecializationInfo* pSpecializationInfo):
     m_vkDevice( vkDevice ),
     m_vkShaderModule( vkShaderModule ),
     m_vkDescriptorSetLayout( vkDescriptorSetLayout ),
@@ -171,6 +176,7 @@ Pipeline::Pipeline(VkDevice vkDevice, VkShaderModule vkShaderModule, VkDescripto
     vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     vkPipelineShaderStageCreateInfo.module = m_vkShaderModule;
     vkPipelineShaderStageCreateInfo.pName = "main";
+    vkPipelineShaderStageCreateInfo.pSpecializationInfo = pSpecializationInfo;
     VkComputePipelineCreateInfo vkComputePipelineCreateInfo = {};
     vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
