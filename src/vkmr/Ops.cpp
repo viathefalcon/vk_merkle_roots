@@ -281,7 +281,7 @@ Reduction& Reduction::operator=(Reduction&& reduction) {
     return (*this);
 }
 
-Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device, vkmr::Pipeline& pipeline) {
+Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device, const vkmr::Pipeline& pipeline) {
 
     // Release any previously-held memory
     this->Free( );
@@ -519,12 +519,68 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     return m_vkResult;
 }
 
-vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
+void Reduction::Free(void) {
+
+    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    if (m_vkBufferHost != VK_NULL_HANDLE){
+        ::vkDestroyBuffer( m_vkDevice, m_vkBufferHost, pAllocator );
+    }
+    if (m_vkHostMemory != VK_NULL_HANDLE){
+        ::vkFreeMemory( m_vkDevice, m_vkHostMemory, pAllocator );
+    }
+}
+
+void Reduction::Reset(void) {
+    m_vkResult = VK_RESULT_MAX_ENUM;
+    m_vkDevice = VK_NULL_HANDLE;
+    m_vkSize = 0U;
+    m_count = 0U;
+    m_vkFence = VK_NULL_HANDLE;
+    m_vkBufferHost = VK_NULL_HANDLE;
+    m_vkHostMemory = VK_NULL_HANDLE;
+}
+
+void Reduction::Release(void) {
+
+    this->Free( );
+    if (m_vkFence != VK_NULL_HANDLE){
+        ::vkDestroyFence( m_vkDevice, m_vkFence, VK_NULL_HANDLE );
+    }
+    m_descriptorSet = DescriptorSet( );
+    m_commandBuffer = CommandBuffer( );
+    Reset( );
+}
+
+class ReductionFactoryImpl : public ReductionFactory {
+public:
+    ReductionFactoryImpl(ComputeDevice&, vkmr::Pipeline&&);
+    virtual ~ReductionFactoryImpl() { m_pipeline = vkmr::Pipeline( ); }
+
+    const vkmr::Pipeline& Pipeline(void) { return m_pipeline; }
+    ::std::unique_ptr<vkmr::Reduction> NewReduction(void);
+
+private:
+    ComputeDevice& m_device;
+    vkmr::Pipeline m_pipeline;
+};
+
+ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline):
+    m_device( device ),
+    m_pipeline( ::std::move( pipeline ) ) { }
+
+::std::unique_ptr<vkmr::Reduction> ReductionFactoryImpl::NewReduction(void) {
+    return std::unique_ptr<Reduction>(
+        new Reduction( *m_device, m_device.AllocateDescriptorSet( m_pipeline ), m_device.AllocateCommandBuffer( ) )
+    );
+}
+
+::std::unique_ptr<ReductionFactory> ReductionFactory::New(ComputeDevice& device) {
 
     // Look for an early out
+    ::std::unique_ptr<ReductionFactory> factory;
     auto vkDevice = *device;
     if (vkDevice == VK_NULL_HANDLE){
-        return vkmr::Pipeline( );
+        return factory;
     }
 
     // Prep
@@ -615,41 +671,13 @@ vkmr::Pipeline Reduction::Pipeline(ComputeDevice& device) {
     specializationInfo.pData = workgroupSize;
 
     // Wrap it all up, maybe
-    return (vkResult == VK_SUCCESS)
-        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, &specializationInfo )
-        : vkmr::Pipeline( );
-}
-
-void Reduction::Free(void) {
-
-    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
-    if (m_vkBufferHost != VK_NULL_HANDLE){
-        ::vkDestroyBuffer( m_vkDevice, m_vkBufferHost, pAllocator );
+    if (vkResult == VK_SUCCESS){
+        factory.reset( new ReductionFactoryImpl(
+            device,
+            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, &specializationInfo )
+        ) );
     }
-    if (m_vkHostMemory != VK_NULL_HANDLE){
-        ::vkFreeMemory( m_vkDevice, m_vkHostMemory, pAllocator );
-    }
-}
-
-void Reduction::Reset(void) {
-    m_vkResult = VK_RESULT_MAX_ENUM;
-    m_vkDevice = VK_NULL_HANDLE;
-    m_vkSize = 0U;
-    m_count = 0U;
-    m_vkFence = VK_NULL_HANDLE;
-    m_vkBufferHost = VK_NULL_HANDLE;
-    m_vkHostMemory = VK_NULL_HANDLE;
-}
-
-void Reduction::Release(void) {
-
-    this->Free( );
-    if (m_vkFence != VK_NULL_HANDLE){
-        ::vkDestroyFence( m_vkDevice, m_vkFence, VK_NULL_HANDLE );
-    }
-    m_descriptorSet = DescriptorSet( );
-    m_commandBuffer = CommandBuffer( );
-    Reset( );
+    return factory;
 }
 
 } // namespace vkmr

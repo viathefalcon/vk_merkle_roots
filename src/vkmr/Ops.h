@@ -7,6 +7,9 @@
 // Includes
 //
 
+// C++ Standard Library Headers
+#include <memory>
+
 // Local Project Headers
 #include "Slices.h"
 #include "Batches.h"
@@ -60,10 +63,8 @@ public:
     operator bool() const { return (m_vkResult == VK_SUCCESS); }
     operator VkResult() const { return m_vkResult; }
 
-    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, vkmr::Pipeline&);
+    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
     VkResult Dispatch(VkQueue);
-
-    static vkmr::Pipeline Pipeline(ComputeDevice&);
 
 private:
     void Free(void);
@@ -81,6 +82,17 @@ private:
 
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
+};
+
+// A class of objects that can instantiate Reductions for a given compute device
+class ReductionFactory {
+public:
+    virtual ~ReductionFactory(void) = default;
+
+    virtual const vkmr::Pipeline& Pipeline(void) = 0;
+    virtual ::std::unique_ptr<vkmr::Reduction> NewReduction(void) = 0;
+
+    static ::std::unique_ptr<ReductionFactory> New(ComputeDevice&);
 };
 
 } // namespace vkmr

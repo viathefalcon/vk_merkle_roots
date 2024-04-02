@@ -79,9 +79,9 @@ private:
     Pipeline m_mapping_pipeline;
     Mapping m_mapping;
     Batch m_batch;
-    slice_type m_slice; 
-    Pipeline m_reduction_pipeline;
-    Reduction m_reduction;
+    slice_type m_slice;
+    ::std::unique_ptr<ReductionFactory> m_reductions;
+    ::std::unique_ptr<Reduction> m_reduction;
 };
 #endif // defined (VULKAN_SUPPORT)
 
