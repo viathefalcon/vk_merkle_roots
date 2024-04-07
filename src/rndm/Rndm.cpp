@@ -28,33 +28,31 @@ int main(int argc, const char* argv[]) {
     typedef unsigned delim_type;
     const auto delim_width = vkmr::max_string_length<delim_type>( );
 
+    // Set the seed
+    const auto seed = (argc > 1) ? std::atol( argv[1] ) : std::time( NULL );
+    std::srand( static_cast<unsigned>( seed ) );
+    std::cerr << "Using seed: " << seed << std::endl;
+
     // Fail safe
-    if (argc < 2){
+    if (argc < 3){
         std::cerr << "Usage: rndm [seed] [max total size] [max element size]" << std::endl;
         return 1;
     }
 
     // Get the upper bound for the output size
-    const auto bound = std::atol( (argc > 2) ? argv[2] : argv[1] );
-
-    // Set the seed
-    const auto seed = (argc > 2) ? std::atol( argv[1] ) : std::time( NULL );
-    std::srand( static_cast<unsigned>( seed ) );
+    const auto bound = std::atol( argv[2] );
 
     // Get the maximum length of any given output string
-    const auto max = (argc > 3) ? std::atol( argv[3] ) : 0;
+    const auto max = (argc > 3) ? std::atol( argv[3] ) : std::min( 16384L, bound );
 
     // Start generating/writing until we've written just as much as asked for
     size_t count = 0U;
-    for (long sum = 0U; sum < bound; ++count ){
-        // Get the length of the next string
-        const auto r = std::rand( );
-        const auto len = (max == 0) ? r : (r % max);
+    long sum = 0U;
+    for ( ; sum < bound; ++count ){
+        // Get the length of the next string, capped to the lesser of the set maximum
+        // and the remaining unfilled total
+        const auto len = std::rand( ) % std::min( max, bound - sum );
         if (len == 0){
-            continue;
-        }
-        if ((sum + len) > bound){
-            // Can stop here
             break;
         }
 
@@ -85,6 +83,6 @@ int main(int argc, const char* argv[]) {
         fflush( stdout );
         sum += len;
     }
-    std::cerr << "Wrote " << count << " string(s)" << std::endl;
+    std::cerr << "Wrote " << count << " string(s) in a total of " << sum << " byte(s)." << std::endl << std::endl;
     return 0;
 }

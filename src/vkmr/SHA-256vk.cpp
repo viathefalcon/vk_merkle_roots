@@ -106,10 +106,19 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
             VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
             ::vkGetPhysicalDeviceProperties( vkPhysicalDevice, &vkPhysicalDeviceProperties );
 
+            // Restrict to devices which declare themselves to be actual GPUs
+            // (and not, say, virtual GPUs, CPUs, etc)
+            const auto gpuDeviceTypeMask = int(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) | int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+            const auto deviceType = int(vkPhysicalDeviceProperties.deviceType);
+            if ((deviceType & gpuDeviceTypeMask) != deviceType){
+                std::cerr << "Skipping non-GPU device: " << vkPhysicalDeviceProperties.deviceName << endl;
+                continue;
+            }
+
             std::cout << endl;
             std::cout << "Device #" << i << ": " << vkPhysicalDeviceProperties.deviceName << endl;
             std::cout << "maxComputeWorkGroupSize: " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << endl;
-            std::cout << "Device type: " << int(vkPhysicalDeviceProperties.deviceType) << endl;
+            std::cout << "Device type: " << deviceType << endl;
 
             // Count
             uint32_t vkQueueFamilyCount = 0;
