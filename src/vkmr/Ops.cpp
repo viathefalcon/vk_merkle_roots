@@ -585,15 +585,54 @@ ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline
 
     // Prep
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
+    const auto subgroupFeatureFlagMask = int(VK_SUBGROUP_FEATURE_BASIC_BIT) | int(VK_SUBGROUP_FEATURE_SHUFFLE_BIT);
+
+    // Query for subgroup support
+    VkPhysicalDeviceSubgroupProperties subgroupProperties = {};
+    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
+    vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    vkPhysicalDeviceProperties2.pNext = &subgroupProperties;
+    device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
+    const auto subgroupFeatureFlags = subgroupProperties.supportedOperations & (int(VK_SUBGROUP_FEATURE_BASIC_BIT) | int(VK_SUBGROUP_FEATURE_SHUFFLE_BIT));
+    const auto subgroupsSupported =
+        (subgroupFeatureFlags != 0) && ((subgroupProperties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+
+    // If subgroups are supported, then make the workgroup size the same as the
+    // subgroup size
+    VkSpecializationInfo specializationInfo = {};
+    VkSpecializationInfo* pSpecializationInfo = nullptr;
+    if (subgroupsSupported){
+        ::std::cout << "Subgroup feature flags = " << std::hex << subgroupFeatureFlags << ::std::endl;
+        ::std::cout << "Subgroups of size " << std::dec << subgroupProperties.subgroupSize << " are supported." << ::std::endl;
+
+        uint32_t workgroupSize[3] = {subgroupProperties.subgroupSize, 1U, 1U};
+        VkSpecializationMapEntry vkSpecializationMapEntries[3] = {};
+        vkSpecializationMapEntries[0].constantID = 0;
+        vkSpecializationMapEntries[0].offset = 0;
+        vkSpecializationMapEntries[0].size = sizeof(uint32_t);
+        vkSpecializationMapEntries[1].constantID = 1;
+        vkSpecializationMapEntries[1].offset = vkSpecializationMapEntries[0].size + sizeof(uint32_t);
+        vkSpecializationMapEntries[1].size = sizeof(uint32_t);
+        vkSpecializationMapEntries[2].constantID = 2;
+        vkSpecializationMapEntries[2].offset = vkSpecializationMapEntries[1].size + sizeof(uint32_t);
+        vkSpecializationMapEntries[2].size = sizeof(uint32_t);
+        specializationInfo.mapEntryCount = 3;
+        specializationInfo.pMapEntries = vkSpecializationMapEntries;
+        specializationInfo.dataSize = sizeof( workgroupSize );
+        specializationInfo.pData = workgroupSize;
+        pSpecializationInfo = &specializationInfo;
+    }
 
     // Load the shader code
-    ::std::ifstream ifs( "SHA-256-2-be.spv", ::std::ios::binary | ::std::ios::ate );
+    const auto shaderCodePath = subgroupsSupported ? "SHA-256-2-be-subgroups.spv" : "SHA-256-2-be.spv";
+    ::std::ifstream ifs( shaderCodePath, ::std::ios::binary | ::std::ios::ate );
     const auto g = ifs.tellg( );
     ifs.seekg( 0 );
     std::vector<uint32_t> shaderCode( g / sizeof( uint32_t ) );
     ifs.read( reinterpret_cast<char*>( shaderCode.data( ) ), g );
     ifs.close( );
-    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code." << ::std::endl;
+    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code from " << shaderCodePath << ::std::endl;
 
     // Create the shader module
     VkShaderModule vkShaderModule = VK_NULL_HANDLE;
@@ -639,42 +678,11 @@ ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline
         vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
     }
 
-    // Query for subgroup support
-    VkPhysicalDeviceSubgroupProperties subgroupProperties = {};
-    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
-    vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    vkPhysicalDeviceProperties2.pNext = &subgroupProperties;
-    device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
-
-    // Use to make the workgroup size the same as the subgroup size  
-    uint32_t subgroupSize = 1U;
-    if ((subgroupProperties.supportedOperations & VK_SHADER_STAGE_COMPUTE_BIT) != 0){
-        subgroupSize = subgroupProperties.subgroupSize;
-        ::std::cout << "Subgroups of size " << subgroupSize << " are supported." << ::std::endl;
-    }
-    uint32_t workgroupSize[3] = {subgroupSize, 1U, 1U};
-    VkSpecializationMapEntry vkSpecializationMapEntries[3] = {};
-    vkSpecializationMapEntries[0].constantID = 0;
-    vkSpecializationMapEntries[0].offset = 0;
-    vkSpecializationMapEntries[0].size = sizeof(uint32_t);
-    vkSpecializationMapEntries[1].constantID = 1;
-    vkSpecializationMapEntries[1].offset = vkSpecializationMapEntries[0].size + sizeof(uint32_t);
-    vkSpecializationMapEntries[1].size = sizeof(uint32_t);
-    vkSpecializationMapEntries[2].constantID = 2;
-    vkSpecializationMapEntries[2].offset = vkSpecializationMapEntries[1].size + sizeof(uint32_t);
-    vkSpecializationMapEntries[2].size = sizeof(uint32_t);
-    VkSpecializationInfo specializationInfo = {};
-    specializationInfo.mapEntryCount = 3;
-    specializationInfo.pMapEntries = vkSpecializationMapEntries;
-    specializationInfo.dataSize = sizeof( workgroupSize );
-    specializationInfo.pData = workgroupSize;
-
     // Wrap it all up, maybe
     if (vkResult == VK_SUCCESS){
         factory.reset( new ReductionFactoryImpl(
             device,
-            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, &specializationInfo )
+            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, pSpecializationInfo )
         ) );
     }
     return factory;
