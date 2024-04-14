@@ -141,12 +141,21 @@ void CommandBuffer::Release(void) {
     Reset( );
 }
 
+uint32_t WorkgroupSize::GetGroupCountX(uint32_t workItemCount) const {
+
+    auto groupCount = (workItemCount / x);
+    return ((workItemCount % x) == 0)
+        ? groupCount
+        : (groupCount + 1);
+}
+
 Pipeline::Pipeline(Pipeline&& pipeline):
     m_vkDevice( pipeline.m_vkDevice ),
     m_vkShaderModule( pipeline.m_vkShaderModule ),
     m_vkDescriptorSetLayout( pipeline.m_vkDescriptorSetLayout ),
     m_vkPipelineLayout( pipeline.m_vkPipelineLayout ),
-    m_vkPipeline( pipeline.m_vkPipeline ) {
+    m_vkPipeline( pipeline.m_vkPipeline ),
+    m_workGroupSize( pipeline.m_workGroupSize ) {
 
     pipeline.Reset( );
 }
@@ -156,7 +165,7 @@ Pipeline::Pipeline(
     VkShaderModule vkShaderModule,
     VkDescriptorSetLayout vkDescriptorSetLayout,
     VkPipelineLayout vkPipelineLayout,
-    const VkSpecializationInfo* pSpecializationInfo):
+    const WorkgroupSize* pWorkGroupSize):
     m_vkDevice( vkDevice ),
     m_vkShaderModule( vkShaderModule ),
     m_vkDescriptorSetLayout( vkDescriptorSetLayout ),
@@ -168,6 +177,35 @@ Pipeline::Pipeline(
         // Bail
         Release( );
         return;
+    }
+
+    // Capture the work group size, if provided
+    VkSpecializationInfo specializationInfo = {};
+    VkSpecializationInfo* pSpecializationInfo = VK_NULL_HANDLE;
+    if (pWorkGroupSize == nullptr){
+        m_workGroupSize.x = m_workGroupSize.y = m_workGroupSize.z = 1U;
+    }else{
+        m_workGroupSize = (*pWorkGroupSize);
+
+        // Convert the workgroup size into a specialisation for the shader
+        uint32_t workgroupSize[3] = { pWorkGroupSize->x, pWorkGroupSize->y, pWorkGroupSize->z };
+        VkSpecializationMapEntry vkSpecializationMapEntries[3] = {};
+        vkSpecializationMapEntries[0].constantID = 0;
+        vkSpecializationMapEntries[0].offset = 0;
+        vkSpecializationMapEntries[0].size = sizeof(uint32_t);
+
+        vkSpecializationMapEntries[1].constantID = 1;
+        vkSpecializationMapEntries[1].offset = vkSpecializationMapEntries[0].offset + sizeof(uint32_t);
+        vkSpecializationMapEntries[1].size = sizeof(uint32_t);
+
+        vkSpecializationMapEntries[2].constantID = 2;
+        vkSpecializationMapEntries[2].offset = vkSpecializationMapEntries[1].offset + sizeof(uint32_t);
+        vkSpecializationMapEntries[2].size = sizeof(uint32_t);
+        specializationInfo.mapEntryCount = 3;
+        specializationInfo.pMapEntries = vkSpecializationMapEntries;
+        specializationInfo.dataSize = sizeof( workgroupSize );
+        specializationInfo.pData = workgroupSize;
+        pSpecializationInfo = &specializationInfo;
     }
 
     // Initialise the compute pipeline
@@ -198,6 +236,7 @@ Pipeline& Pipeline::operator=(Pipeline&& pipeline) {
         m_vkDescriptorSetLayout = pipeline.m_vkDescriptorSetLayout;
         m_vkPipelineLayout = pipeline.m_vkPipelineLayout;
         m_vkPipeline = pipeline.m_vkPipeline;
+        m_workGroupSize = pipeline.m_workGroupSize;
 
         pipeline.Reset( );
     }
@@ -222,6 +261,7 @@ void Pipeline::Reset(void) {
     m_vkDescriptorSetLayout = VK_NULL_HANDLE;
     m_vkPipelineLayout = VK_NULL_HANDLE;
     m_vkPipeline = VK_NULL_HANDLE;
+    ::std::memset( &m_workGroupSize, 0, sizeof( WorkgroupSize ) );
 }
 
 void Pipeline::Release(void) {
@@ -288,11 +328,11 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
             delete[] pVkExtensionProperties;
         }
     }
-    ::std::cout << "Going to create a device with these extensions: ";
+    cout << "Going to create a device with these extensions: ";
     for (auto it = deviceExtNames.cbegin( ), end = deviceExtNames.cend( ); it != end; ++it){
-        ::std::cout << (*it) << " ";
+        cout << (*it) << " ";
     }
-    ::std::cout << endl;
+    cout << endl;
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
 
     // Enable the synchronization2 feature

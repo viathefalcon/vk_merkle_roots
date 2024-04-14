@@ -285,8 +285,11 @@ void main() {
 #ifdef _SHA_256_2_BE_
 void main() {
 
-    // Who are we?
-    const uint gid = gl_GlobalInvocationID.x << pass;
+    // Bounds check
+    const uint idx = gl_GlobalInvocationID.x << pass;
+    if (idx > bound){
+        return;
+    }
 
     // Set the initial hash values
     uvec4 H1 = Hinitial1;
@@ -294,7 +297,7 @@ void main() {
 
     // Prep and process the first message block
     uint u, v, w;
-    for (u = 0, v = 0, w = gid; u < SHA256_WC; ++u, ++v){
+    for (u = 0, v = 0, w = idx; u < SHA256_WC; ++u, ++v){
         M[v] = leaf[w].data[u];
     }
     for (u = 0, w += delta; u < SHA256_WC; ++u, ++v){
@@ -316,10 +319,10 @@ void main() {
     // Output the result
     const uint wc = (SHA256_WC / 2);
     for (u = 0; u < wc; ++u){
-        leaf[gid].data[u] = H1[u];
+        leaf[idx].data[u] = H1[u];
     }
     for (v = 0; v < wc; ++u, ++v){
-        leaf[gid].data[u] = H2[v];
+        leaf[idx].data[u] = H2[v];
         //debugPrintfEXT("%u => %08x, %08x\n", u, H2[v], leaf[w].data[u]);
     }
 }

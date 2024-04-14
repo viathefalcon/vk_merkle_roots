@@ -88,10 +88,16 @@ typedef struct {
     VkMemoryPropertyFlags vkMemoryPropertyFlags;
 } MemoryTypeBudget;
 
+struct WorkgroupSize {
+    uint32_t x, y, z;
+
+    uint32_t GetGroupCountX(uint32_t) const;
+};
+
 // Encapsulates a pipeline
 class Pipeline {
 public:
-    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout, const VkSpecializationInfo* pSpecializationInfo = VK_NULL_HANDLE);
+    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout, const WorkgroupSize* pWorkGroupSize = nullptr);
     Pipeline(Pipeline&&);
     Pipeline(Pipeline const&) = delete;
 
@@ -106,6 +112,7 @@ public:
 
     VkDescriptorSetLayout DescriptorSetLayout(void) const { return m_vkDescriptorSetLayout; }
     VkPipelineLayout Layout(void) const { return m_vkPipelineLayout; }
+    const WorkgroupSize& GetWorkGroupSize(void) const { return m_workGroupSize; }
 
     static VkPipelineLayout DefaultLayout(VkDevice, VkDescriptorSetLayout);
 
@@ -118,6 +125,8 @@ private:
     VkDescriptorSetLayout m_vkDescriptorSetLayout;
     VkPipelineLayout m_vkPipelineLayout;
     VkPipeline m_vkPipeline;
+
+    WorkgroupSize m_workGroupSize;
 };
 
 // Encapsulates a (logical, Vulkan) compute device

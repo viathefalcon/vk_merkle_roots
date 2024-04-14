@@ -432,7 +432,10 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
 
                 // Actually dispatch the shader invocations
                 count >>= 1;
-                ::vkCmdDispatch( vkCommandBuffer, count, 1, 1 );
+                const auto& workgroupSize = pipeline.GetWorkGroupSize( );
+                const auto x = workgroupSize.GetGroupCountX( count );
+                ::std::cout << "Dispatching " << x << " workgroup(s) of size " << workgroupSize.x << " for " << count << " pair(s)" << ::std::endl;
+                ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
             }
         }
         if (m_vkResult == VK_SUCCESS){
@@ -600,28 +603,16 @@ ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline
 
     // If subgroups are supported, then make the workgroup size the same as the
     // subgroup size
-    VkSpecializationInfo specializationInfo = {};
-    VkSpecializationInfo* pSpecializationInfo = nullptr;
+    WorkgroupSize workgroupSize = {};
+    WorkgroupSize *pWorkgroupSize = nullptr;
     if (subgroupsSupported){
         ::std::cout << "Subgroup feature flags = " << std::hex << subgroupFeatureFlags << ::std::endl;
         ::std::cout << "Subgroups of size " << std::dec << subgroupProperties.subgroupSize << " are supported." << ::std::endl;
 
-        uint32_t workgroupSize[3] = {subgroupProperties.subgroupSize, 1U, 1U};
-        VkSpecializationMapEntry vkSpecializationMapEntries[3] = {};
-        vkSpecializationMapEntries[0].constantID = 0;
-        vkSpecializationMapEntries[0].offset = 0;
-        vkSpecializationMapEntries[0].size = sizeof(uint32_t);
-        vkSpecializationMapEntries[1].constantID = 1;
-        vkSpecializationMapEntries[1].offset = vkSpecializationMapEntries[0].size + sizeof(uint32_t);
-        vkSpecializationMapEntries[1].size = sizeof(uint32_t);
-        vkSpecializationMapEntries[2].constantID = 2;
-        vkSpecializationMapEntries[2].offset = vkSpecializationMapEntries[1].size + sizeof(uint32_t);
-        vkSpecializationMapEntries[2].size = sizeof(uint32_t);
-        specializationInfo.mapEntryCount = 3;
-        specializationInfo.pMapEntries = vkSpecializationMapEntries;
-        specializationInfo.dataSize = sizeof( workgroupSize );
-        specializationInfo.pData = workgroupSize;
-        pSpecializationInfo = &specializationInfo;
+        workgroupSize.x = subgroupProperties.subgroupSize;
+        workgroupSize.y = 1U;
+        workgroupSize.z = 1U;
+        pWorkgroupSize = &workgroupSize;
     }
 
     // Load the shader code
@@ -682,7 +673,7 @@ ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline
     if (vkResult == VK_SUCCESS){
         factory.reset( new ReductionFactoryImpl(
             device,
-            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, pSpecializationInfo )
+            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, pWorkgroupSize )
         ) );
     }
     return factory;
