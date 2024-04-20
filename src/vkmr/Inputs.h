@@ -11,9 +11,6 @@
 #include <fstream>
 #include <string>
 
-// Nearby Project Headers
-#include "../common/Utils.h"
-
 namespace vkmr {
 
 // Class(es)
@@ -47,9 +44,6 @@ private:
     FILE* m_fp;
     bool m_owner;
     size_type m_size, m_count;
-
-    typedef unsigned delim_type;
-    const ::std::string::size_type m_delim_width;
 };
 
 } // namespace vkmr

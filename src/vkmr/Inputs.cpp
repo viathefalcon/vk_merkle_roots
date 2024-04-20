@@ -5,7 +5,6 @@
 //
 
 // C++ Standard Library Headers
-#include <vector>
 #include <iostream>
 
 // Declarations
@@ -20,24 +19,21 @@ Input::Input(void):
     m_fp( NULL ),
     m_owner( false ),
     m_size( 0U ),
-    m_count( 0U ),
-    m_delim_width( max_string_length<delim_type>( ) ) {    
+    m_count( 0U ) {    
 }
 
 Input::Input(const std::string& path):
     m_fp( ::fopen( path.c_str( ), "r" ) ),
     m_owner( true ),
     m_size( 0U ),
-    m_count( 0U ),
-    m_delim_width( max_string_length<delim_type>( ) ) {
+    m_count( 0U ) {
 }
 
 Input::Input(Input&& input):
     m_fp( input.m_fp ),
     m_owner( input.m_owner ),
     m_size( input.m_size ),
-    m_count( input.m_count ),
-    m_delim_width( max_string_length<delim_type>( ) ) {
+    m_count( input.m_count ) {
 
     input.Reset( );
 }
@@ -46,8 +42,7 @@ Input::Input(FILE* fp, bool owner):
     m_fp( fp ),
     m_owner( owner ),
     m_size( 0U ),
-    m_count( 0U ),
-    m_delim_width( max_string_length<delim_type>( ) ) {
+    m_count( 0U ) {
 }
 
 Input::~Input(void) {
@@ -79,40 +74,25 @@ Input::operator bool(void) const {
 
 std::string Input::Get(void) {
 
-    // Read in the length
+    // Setup
+    const auto lf = static_cast<int>( '\n' );
+
+    // Read until we hit the EOF or line-feed
     std::string str;
-    do {
+    for (bool not_finished = true; not_finished; ){
         const auto input = fgetc( m_fp );
-        if (input == EOF){
-            // Nope, bail
-            return "";
+        switch (input) {
+            case lf:
+            case EOF:
+                not_finished = false;
+                break;
+
+            default:
+                // Accumulate
+                str.append( 1, static_cast<char>( input ) );
+                break;
         }
-
-        // Accumulate
-        str.append( 1, static_cast<char>( input ) );
-    } while (str.size( ) < m_delim_width);
-
-    // Parse
-    const auto length = static_cast<decltype(str)::size_type>(
-        std::atol( str.c_str( ) ) // 'long' because actual type is unsigned and could overflow an int
-    );
-    if (length < 1){
-        // Bail
-        return "";
     }
-    str.clear( );
-
-    // Read in the string itself
-    str.reserve( static_cast<size_t>( length ) );
-    do {
-        const auto input = fgetc( m_fp );
-        if (input == EOF){
-            break;
-        }
-
-        // Accumulate
-        str.append( 1, static_cast<char>( input ) );
-    } while (str.size( ) < length);
 
     // Tally up and return
     m_size += str.size( );

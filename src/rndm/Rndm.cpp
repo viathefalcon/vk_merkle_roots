@@ -9,24 +9,15 @@
 #include <stdio.h>
 
 // C++ Standard Library Headers
+#include <ctime>
 #include <cstdlib>
-#include <iomanip>
-#include <sstream>
 #include <iostream>
-#include <algorithm>
-
-// Nearby Project Headers
-#include "../common/Utils.h"
 
 // Functions
 //
 
 // Gives the entry-point
 int main(int argc, const char* argv[]) {
-
-    // Figure out the maximum width of the length-delimiter
-    typedef unsigned delim_type;
-    const auto delim_width = vkmr::max_string_length<delim_type>( );
 
     // Set the seed
     const auto seed = (argc > 1) ? std::atol( argv[1] ) : std::time( NULL );
@@ -49,25 +40,16 @@ int main(int argc, const char* argv[]) {
     size_t count = 0U;
     long sum = 0U;
     for ( ; sum < bound; ++count ){
-        // Get the length of the next string, capped to the lesser of the set maximum
-        // and the remaining unfilled total
-        const auto len = std::rand( ) % std::min( max, bound - sum );
+        // Get a non-zero random value less than the set maximum
+        const auto r = 1 + (std::rand( ) % (max - 1));
+
+        // Use to get the length of the next string, capped to the remaining unfilled total
+        const auto len = std::min( bound - sum, r );
         if (len == 0){
             break;
         }
-
-        // Format into a fixed-length character string
-        std::ostringstream oss;
-        oss << std::setfill('0') << std::setw( delim_width ) << static_cast<delim_type>( len );
-
-        // Write it out
-        const auto output = oss.str( );
-        if (fwrite( output.c_str( ), sizeof( decltype( output )::value_type ), output.size( ), stdout ) < output.size( )){
-            // Bail
-            return 1;
-        }
         
-        // Write out the data itself
+        // Generate, write out the data itself
         const size_t nchars = 1;
         const int extent = 126, offset = 32;
         for (auto written = 0U; written < len; ++written){
@@ -77,6 +59,13 @@ int main(int argc, const char* argv[]) {
                 // Bail
                 return 1;
             }
+        }
+
+        // Write out a line separator
+        const auto output = '\n';
+        if (fwrite( &output, sizeof( output ), nchars, stdout ) < nchars){
+            // Bail
+            return 1;
         }
 
         // Flush and accumulate

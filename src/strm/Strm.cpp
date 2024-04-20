@@ -10,8 +10,6 @@
 
 // C++ Standard Library Headers
 #include <cstring>
-#include <iomanip>
-#include <sstream>
 
 // Functions
 //
@@ -25,19 +23,12 @@ int main(int argc, const char* argv[]) {
         const auto arg = *(argv + i);
         const auto len = std::strlen( arg );
 
-        // Format into a fixed-length character string
-        std::ostringstream oss;
-        oss << std::setfill('0') << std::setw( 10 ) << static_cast<unsigned>( len );
-        
-        // Write it out
-        const auto output = oss.str( );
-        if (fwrite( output.c_str( ), sizeof( decltype( output )::value_type ), output.size( ), stdout ) < output.size( )){
-            // Bail
-            return 1;
-        }
-
         // Write out the characters
         fwrite( arg, sizeof( char ), len, stdout );
+
+        // Write out a line separator
+        const auto output = '\n';
+        fwrite( &output, sizeof( output ), 1, stdout );
     }
     fflush( stdout );
     return 0;
