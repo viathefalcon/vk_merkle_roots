@@ -79,8 +79,8 @@ int main(int argc, const char* argv[]) {
             cout << instance.Name( ) << ":" << endl;
             StopWatch sw;
             sw.Start( );
-            instance.Root( );
-            cout << "(" << sw.Elapsed( ) << ")" << endl;
+            const auto root = instance.Root( );
+            cout << root << " (" << sw.Elapsed( ) << ")" << endl;
         } );
 #endif
     }

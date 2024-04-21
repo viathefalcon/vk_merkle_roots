@@ -141,6 +141,59 @@ void CommandBuffer::Release(void) {
     Reset( );
 }
 
+CommandPool::CommandPool(VkDevice vkDevice, uint32_t queueFamily):
+    m_vkResult( VK_RESULT_MAX_ENUM ),
+    m_vkDevice( vkDevice ),
+    m_vkCommandPool( VK_NULL_HANDLE ) {
+    
+    VkCommandPoolCreateInfo vkCommandPoolCreateInfo = {};
+    vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    vkCommandPoolCreateInfo.queueFamilyIndex = queueFamily;
+    vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    m_vkResult = ::vkCreateCommandPool( m_vkDevice, &vkCommandPoolCreateInfo, VK_NULL_HANDLE, &m_vkCommandPool );
+}
+
+CommandPool::CommandPool(CommandPool&& commandPool):
+    m_vkResult( commandPool.m_vkResult ),
+    m_vkDevice( commandPool.m_vkDevice ),
+    m_vkCommandPool( commandPool.m_vkCommandPool ) {
+
+    commandPool.Reset( );
+}
+
+CommandPool& CommandPool::operator=(CommandPool&& commandPool) {
+
+    if (this != &commandPool){
+        Release( );
+
+        m_vkResult = commandPool.m_vkResult;
+        m_vkDevice = commandPool.m_vkDevice;
+        m_vkCommandPool = commandPool.m_vkCommandPool;
+
+        commandPool.Reset( );
+    }
+    return (*this);
+}
+
+CommandBuffer CommandPool::AllocateCommandBuffer(void) {
+    return CommandBuffer( m_vkDevice, m_vkCommandPool );
+}
+
+void CommandPool::Reset(void) {
+
+    m_vkResult = VK_RESULT_MAX_ENUM;
+    m_vkDevice = VK_NULL_HANDLE;
+    m_vkCommandPool = VK_NULL_HANDLE;
+}
+
+void CommandPool::Release(void) {
+
+    if (m_vkCommandPool != VK_NULL_HANDLE){
+        ::vkDestroyCommandPool( m_vkDevice, m_vkCommandPool, VK_NULL_HANDLE );
+    }
+    Reset( );
+}
+
 uint32_t WorkgroupSize::GetGroupCountX(uint32_t workItemCount) const {
 
     auto groupCount = (workItemCount / x);
@@ -282,14 +335,71 @@ void Pipeline::Release(void) {
     Reset( );
 }
 
+DescriptorPool::DescriptorPool(VkDevice vkDevice, uint32_t setCount, uint32_t descriptorCount):
+    m_vkResult( VK_RESULT_MAX_ENUM ),
+    m_vkDevice( vkDevice ),
+    m_vkDescriptorPool( VK_NULL_HANDLE ) {
+    
+    VkDescriptorPoolSize vkDescriptorPoolSize = {};
+    vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    vkDescriptorPoolSize.descriptorCount = descriptorCount; // This is the total number, *across* descriptor sets allocated from the pool
+    VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo = {};
+    vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    vkDescriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    vkDescriptorPoolCreateInfo.maxSets = setCount;
+    vkDescriptorPoolCreateInfo.poolSizeCount = 1;
+    vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
+    m_vkResult = ::vkCreateDescriptorPool( m_vkDevice, &vkDescriptorPoolCreateInfo, VK_NULL_HANDLE, &m_vkDescriptorPool );
+}
+
+DescriptorPool::DescriptorPool(DescriptorPool&& descriptorPool):
+    m_vkResult( descriptorPool.m_vkResult ),
+    m_vkDevice( descriptorPool.m_vkDevice ),
+    m_vkDescriptorPool( descriptorPool.m_vkDescriptorPool ) {
+
+    descriptorPool.Reset( );
+}
+
+DescriptorPool& DescriptorPool::operator=(DescriptorPool&& descriptorPool) {
+
+    if (this != &descriptorPool){
+        this->Release( );
+
+        m_vkResult = descriptorPool.m_vkResult;
+        m_vkDevice = descriptorPool.m_vkDevice;
+        m_vkDescriptorPool = descriptorPool.m_vkDescriptorPool;
+        m_vkDescriptorPool = descriptorPool.m_vkDescriptorPool;
+
+        descriptorPool.Reset( );
+    }
+    return (*this);
+}
+
+DescriptorSet DescriptorPool::AllocateDescriptorSet(Pipeline& p) const {
+    return DescriptorSet( m_vkDevice, m_vkDescriptorPool, p.DescriptorSetLayout( ) );   
+}
+
+void DescriptorPool::Reset(void) {
+
+    m_vkResult = VK_RESULT_MAX_ENUM;
+    m_vkDevice = VK_NULL_HANDLE;
+    m_vkDescriptorPool = VK_NULL_HANDLE;
+}
+
+void DescriptorPool::Release(void) {
+
+    if (m_vkDescriptorPool != VK_NULL_HANDLE){
+        ::vkDestroyDescriptorPool( m_vkDevice, m_vkDescriptorPool, VK_NULL_HANDLE );
+    }
+    Reset( );
+}
+
 ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFamily, uint32_t queueCount):
     m_vkPhysicalDevice( vkPhysicalDevice ),
     m_queueFamily( queueFamily ),
     m_queueCount( queueCount ),
     m_vkResult( VK_RESULT_MAX_ENUM ),
-    m_vkDevice( VK_NULL_HANDLE),
-    m_vkCommandPool( VK_NULL_HANDLE),
-    m_vkDescriptorPool( VK_NULL_HANDLE ) {
+    m_vkDevice( VK_NULL_HANDLE ) {
 
     using ::std::strcmp;
     using ::std::vector;
@@ -357,29 +467,6 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
         vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtNames.data( );
     }
     m_vkResult = ::vkCreateDevice( vkPhysicalDevice, &vkDeviceCreateInfo, pAllocator, &m_vkDevice );
-    if (m_vkResult == VK_SUCCESS){
-        // Create the command pool
-        VkCommandPoolCreateInfo vkCommandPoolCreateInfo = {};
-        vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        vkCommandPoolCreateInfo.queueFamilyIndex = queueFamily;
-        vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        m_vkResult = ::vkCreateCommandPool( m_vkDevice, &vkCommandPoolCreateInfo, pAllocator, &m_vkCommandPool );
-    }
-    if (m_vkResult == VK_SUCCESS){
-        const uint32_t setCount = 2;
-
-        // Create the descriptor pool
-        VkDescriptorPoolSize vkDescriptorPoolSize = {};
-        vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        vkDescriptorPoolSize.descriptorCount = (3 + 1) * setCount; // This is the total number, *across* descriptor sets allocated from the pool
-        VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo = {};
-        vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        vkDescriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        vkDescriptorPoolCreateInfo.maxSets = setCount;
-        vkDescriptorPoolCreateInfo.poolSizeCount = 1;
-        vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
-        m_vkResult = ::vkCreateDescriptorPool( m_vkDevice, &vkDescriptorPoolCreateInfo, pAllocator, &m_vkDescriptorPool );
-    }
 }
 
 ComputeDevice::ComputeDevice(ComputeDevice&& device):
@@ -387,9 +474,7 @@ ComputeDevice::ComputeDevice(ComputeDevice&& device):
     m_queueFamily( device.m_queueFamily ),
     m_queueCount( device.m_queueCount ),
     m_vkResult( device.m_vkResult ),
-    m_vkDevice( device.m_vkDevice),
-    m_vkCommandPool( device.m_vkCommandPool),
-    m_vkDescriptorPool( device.m_vkDescriptorPool ) {
+    m_vkDevice( device.m_vkDevice) {
 
     device.Reset( );
 }
@@ -404,12 +489,18 @@ ComputeDevice& ComputeDevice::operator=(ComputeDevice&& device) {
         m_queueCount = device.m_queueCount;
         m_vkResult = device.m_vkResult;
         m_vkDevice = device.m_vkDevice;
-        m_vkCommandPool = device.m_vkCommandPool;
-        m_vkDescriptorPool = device.m_vkDescriptorPool;
 
         device.Reset( );
     }
     return (*this);
+}
+
+DescriptorPool ComputeDevice::CreateDescriptorPool(uint32_t setCount, uint32_t descriptorCount) const {
+    return DescriptorPool( m_vkDevice, setCount, descriptorCount );
+}
+
+CommandPool ComputeDevice::CreateCommandPool(void) const {
+    return CommandPool( m_vkDevice, m_queueFamily );
 }
 
 VkQueue ComputeDevice::Queue(uint32_t queueIndex) const {
@@ -457,14 +548,6 @@ VkDeviceSize ComputeDevice::MinStorageBufferOffset(void) const {
     VkPhysicalDeviceProperties properties;
     ::vkGetPhysicalDeviceProperties( m_vkPhysicalDevice, &properties );
     return properties.limits.minStorageBufferOffsetAlignment;
-}
-
-DescriptorSet ComputeDevice::AllocateDescriptorSet(Pipeline& pipeline) const {
-    return DescriptorSet( m_vkDevice, m_vkDescriptorPool, pipeline.DescriptorSetLayout( ) );
-}
-
-CommandBuffer ComputeDevice::AllocateCommandBuffer(void) const {
-    return CommandBuffer( m_vkDevice, m_vkCommandPool );
 }
 
 ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
@@ -549,19 +632,11 @@ void ComputeDevice::Reset() {
     m_queueFamily = uint32_t(-1);
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
-    m_vkCommandPool = VK_NULL_HANDLE;
-    m_vkDescriptorPool = VK_NULL_HANDLE;
 }
 
 void ComputeDevice::Release() {
 
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
-    if (m_vkDescriptorPool != VK_NULL_HANDLE){
-        ::vkDestroyDescriptorPool( m_vkDevice, m_vkDescriptorPool, pAllocator );
-    }
-    if (m_vkCommandPool != VK_NULL_HANDLE){
-        ::vkDestroyCommandPool( m_vkDevice, m_vkCommandPool, pAllocator );
-    }
     if (m_vkDevice != VK_NULL_HANDLE){
         ::vkDestroyDevice( m_vkDevice, pAllocator );
     }

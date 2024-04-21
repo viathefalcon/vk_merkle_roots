@@ -1,10 +1,11 @@
-// Ops.cpp: defines the types, functions and classes which encapsulate asynchronous on-device operations 
+// Reductions.cpp: defines the types, functions and classes which encapsulate asynchronous on-device reduction operations 
 //
 
 // Includes
 //
 
 // C++ Standard Library Headers
+#include <vector>
 #include <cstring>
 #include <iostream>
 #include <fstream>
@@ -27,209 +28,43 @@ namespace vkmr {
 
 // Classes
 //
-Mapping::Mapping(Mapping&& mapping):
-    m_vkResult( mapping.m_vkResult ),
-    m_vkDevice( mapping.m_vkDevice ),
-    m_vkFence( mapping.m_vkFence ),
-    m_descriptorSet( ::std::move( mapping.m_descriptorSet ) ),
-    m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ) {
-    
-    mapping.Reset( );
-}
+class Reduction {
+public:
+    Reduction(Reduction&&);
+    Reduction(VkDevice, DescriptorSet&&, CommandBuffer&&);
+    Reduction(Reduction const&) = delete;
 
-Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer):
-    m_vkResult( VK_RESULT_MAX_ENUM ),
-    m_vkDevice( vkDevice ),
-    m_vkFence( VK_NULL_HANDLE ),
-    m_descriptorSet( ::std::move( descriptorSet ) ),
-    m_commandBuffer( ::std::move( commandBuffer ) ) {
+    Reduction(void) { Reset( ); }
+    ~Reduction(void) { Release( ); }
 
-    // Create the fence
-    VkFenceCreateInfo vkFenceCreateInfo = {};
-    vkFenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    m_vkResult = ::vkCreateFence( m_vkDevice, &vkFenceCreateInfo, VK_NULL_HANDLE, &m_vkFence );
-}
+    Reduction& operator=(Reduction const&) = delete;
+    Reduction& operator=(Reduction&&);
+    operator bool() const { return (m_vkResult == VK_SUCCESS); }
+    operator VkResult() const { return m_vkResult; }
+    operator VkSha256Result() { return m_vkSha256Result; }
 
-Mapping& Mapping::operator=(Mapping&& mapping) {
+    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
+    VkResult Dispatch(VkFence, VkQueue);
 
-    if (this != &mapping){
-        Release( );
+private:
+    void Free(void);
+    void Reset(void);
+    void Release(void);
 
-        m_vkResult = mapping.m_vkResult;
-        m_vkDevice = mapping.m_vkDevice;
-        m_vkFence = mapping.m_vkFence;
-        m_descriptorSet = ::std::move( mapping.m_descriptorSet );
-        m_commandBuffer = ::std::move( mapping.m_commandBuffer );
+    VkResult m_vkResult;
+    VkDevice m_vkDevice;
+    VkDeviceSize m_vkSize;
+    uint m_count;
 
-        mapping.Reset( );
-    }
-    return (*this);
-}
+    VkFence m_vkFence;
+    VkBuffer m_vkBufferHost;
+    VkDeviceMemory m_vkHostMemory;
 
-Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeline& pipeline) {
+    DescriptorSet m_descriptorSet;
+    CommandBuffer m_commandBuffer;
 
-    // Update the descriptor set
-    const auto batchBufferDescriptors = batch.BufferDescriptors( );
-    const auto sliceBufferDescriptor = slice.BufferDescriptor( );
-    VkWriteDescriptorSet vkWriteDescriptorSetInputs = {};
-    vkWriteDescriptorSetInputs.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    vkWriteDescriptorSetInputs.dstSet = *m_descriptorSet;
-    vkWriteDescriptorSetInputs.descriptorCount = 1;
-    vkWriteDescriptorSetInputs.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    vkWriteDescriptorSetInputs.pBufferInfo = &(batchBufferDescriptors.vkDescriptorBufferInputs);
-    VkWriteDescriptorSet vkWriteDescriptorSetMetadata = {};
-    vkWriteDescriptorSetMetadata.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    vkWriteDescriptorSetMetadata.dstSet = *m_descriptorSet;
-    vkWriteDescriptorSetMetadata.dstBinding = 1;
-    vkWriteDescriptorSetMetadata.descriptorCount = 1;
-    vkWriteDescriptorSetMetadata.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    vkWriteDescriptorSetMetadata.pBufferInfo = &(batchBufferDescriptors.vkDescriptorBufferMetdata);
-    VkWriteDescriptorSet vkWriteDescriptorSetResults = {};
-    vkWriteDescriptorSetResults.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    vkWriteDescriptorSetResults.dstSet = *m_descriptorSet;
-    vkWriteDescriptorSetResults.dstBinding = 2;
-    vkWriteDescriptorSetResults.descriptorCount = 1;
-    vkWriteDescriptorSetResults.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    vkWriteDescriptorSetResults.pBufferInfo = &(sliceBufferDescriptor);
-    VkWriteDescriptorSet vkWriteDescriptorSets[] = {
-        vkWriteDescriptorSetInputs,
-        vkWriteDescriptorSetMetadata,
-        vkWriteDescriptorSetResults
-    };
-    ::vkUpdateDescriptorSets( m_vkDevice, 3, vkWriteDescriptorSets, 0, VK_NULL_HANDLE );
-
-    // Update the command buffer
-    auto vkCommandBuffer = *m_commandBuffer;
-    VkCommandBufferBeginInfo vkCommandBufferBeginInfo = {};
-    vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    m_vkResult = ::vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
-    if (m_vkResult == VK_SUCCESS){
-        ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
-
-        VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
-        ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
-
-        // c.f. https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples#cpu-read-back-of-data-written-by-a-compute-shader
-        VkMemoryBarrier2KHR host2ShaderMemB = {};
-        host2ShaderMemB.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        host2ShaderMemB.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT_KHR;
-        host2ShaderMemB.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT_KHR;
-        host2ShaderMemB.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-        host2ShaderMemB.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-        VkDependencyInfoKHR host2ShaderDep = {};
-        host2ShaderDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        host2ShaderDep.memoryBarrierCount = 1;
-        host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
-        g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
-
-        // Actually dispatch the shader invocations
-        ::vkCmdDispatch( vkCommandBuffer, static_cast<uint32_t>( batch.Count( ) ), 1, 1 );
-        m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
-    }
-    return (*this);
-}
-
-VkResult Mapping::Dispatch(VkQueue vkQueue) {
-
-    // Look for an early out
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
-    }
-
-    // Reset the fence
-    m_vkResult = ::vkResetFences( m_vkDevice, 1, &m_vkFence );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
-    }
-    VkCommandBuffer commandBuffers[] = { *m_commandBuffer };
-
-    // Submit the (presumably previously-recordded) commands onto the queue
-    VkSubmitInfo vkSubmitInfo = {};
-    vkSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    vkSubmitInfo.commandBufferCount = 1;
-    vkSubmitInfo.pCommandBuffers = commandBuffers;
-    m_vkResult = ::vkQueueSubmit( vkQueue, 1, &vkSubmitInfo, m_vkFence );
-    if (m_vkResult == VK_SUCCESS){
-        // Wait
-        m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &m_vkFence, true, uint64_t(-1) );
-    }
-    return m_vkResult;
-}
-
-void Mapping::Reset(void) {
-    m_vkResult = VK_RESULT_MAX_ENUM;
-    m_vkDevice = VK_NULL_HANDLE;
-    m_vkFence = VK_NULL_HANDLE;
-}
-
-void Mapping::Release(void) {
-
-    if (m_vkFence != VK_NULL_HANDLE){
-        ::vkDestroyFence( m_vkDevice, m_vkFence, VK_NULL_HANDLE );
-    }
-    m_descriptorSet = DescriptorSet( );
-    m_commandBuffer = CommandBuffer( );
-    Reset( );
-}
-
-vkmr::Pipeline Mapping::Pipeline(ComputeDevice& device) {
-
-    // Look for an early out
-    auto vkDevice = *device;
-    if (vkDevice == VK_NULL_HANDLE){
-        return vkmr::Pipeline( );
-    }
-
-    // Prep
-    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
-
-    // Load the shader code
-    ::std::ifstream ifs( "SHA-256-n.spv", ::std::ios::binary | ::std::ios::ate );
-    const auto g = ifs.tellg( );
-    ifs.seekg( 0 );
-    std::vector<uint32_t> shaderCode( g / sizeof( uint32_t ) );
-    ifs.read( reinterpret_cast<char*>( shaderCode.data( ) ), g );
-    ifs.close( );
-    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code." << ::std::endl;
-
-    // Create the shader module
-    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
-    VkShaderModuleCreateInfo vkShaderModuleCreateInfo = {};
-    vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vkShaderModuleCreateInfo.codeSize = shaderCode.size( ) * sizeof( uint32_t );
-    vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( shaderCode.data( ) );
-    VkResult vkResult = ::vkCreateShaderModule( vkDevice, &vkShaderModuleCreateInfo, pAllocator, &vkShaderModule );
-
-    // Create the descriptor set layout
-    VkDescriptorSetLayout vkDescriptorSetLayout = VK_NULL_HANDLE;
-    if (vkResult == VK_SUCCESS){
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding1 = {};
-        vkDescriptorSetLayoutBinding1.binding = 0;
-        vkDescriptorSetLayoutBinding1.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        vkDescriptorSetLayoutBinding1.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        vkDescriptorSetLayoutBinding1.descriptorCount = 1;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding2 = vkDescriptorSetLayoutBinding1;
-        vkDescriptorSetLayoutBinding2.binding = 1;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBinding3 = vkDescriptorSetLayoutBinding1;
-        vkDescriptorSetLayoutBinding3.binding = 2;
-        VkDescriptorSetLayoutBinding vkDescriptorSetLayoutBindings[] = {
-            vkDescriptorSetLayoutBinding1,
-            vkDescriptorSetLayoutBinding2,
-            vkDescriptorSetLayoutBinding3
-        };
-        VkDescriptorSetLayoutCreateInfo vkDescriptorSetLayoutCreateInfo = {};
-        vkDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        vkDescriptorSetLayoutCreateInfo.bindingCount = 3;
-        vkDescriptorSetLayoutCreateInfo.pBindings = vkDescriptorSetLayoutBindings;
-        vkResult = ::vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &vkDescriptorSetLayout );
-    }
-
-    // Wrap it all up, maybe
-    return (vkResult == VK_SUCCESS)
-        ? vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkmr::Pipeline::DefaultLayout( vkDevice, vkDescriptorSetLayout ) )
-        : vkmr::Pipeline( );
-}
+    VkSha256Result m_vkSha256Result;
+};
 
 Reduction::Reduction(Reduction&& reduction):
     m_vkResult( reduction.m_vkResult ),
@@ -463,7 +298,7 @@ Reduction& Reduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& device,
     return (*this);
 }
 
-VkResult Reduction::Dispatch(VkQueue vkQueue) {
+VkResult Reduction::Dispatch(VkFence vkFence, VkQueue vkQueue) {
 
     // Look for an early out
     if (m_vkResult != VK_SUCCESS){
@@ -471,6 +306,12 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
+    }
+
+    // Wait on the provided fence
+    m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &vkFence, true, uint64_t(-1) );
+    if (m_vkResult != VK_SUCCESS){
+        return m_vkResult;
     }
 
     // Reset the fence
@@ -497,8 +338,9 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
         m_vkResult = ::vkMapMemory( m_vkDevice, m_vkHostMemory, 0U, VK_WHOLE_SIZE, 0, &pMapped );
     }
     if (m_vkResult == VK_SUCCESS){
-        // Iterate the results (🤞)
         const auto pResults = static_cast<uint8_t*>( pMapped );
+        /*
+        // Iterate the results
         for (decltype(m_count) counter = 0U; counter < 1U; ++counter){
             const VkDeviceSize vkOffset = sizeof( VkSha256Result ) * counter;
 
@@ -512,6 +354,14 @@ VkResult Reduction::Dispatch(VkQueue vkQueue) {
                 result.data[u] = SWOP_ENDS_U32( w );
             }
             ::std::cout << print_bytes_ex( result.data, SHA256_WC ).str( ) << std::endl;
+        }
+        */
+        ::std::memcpy( &m_vkSha256Result, pResults, sizeof( VkSha256Result ) );
+
+        // The output is big-endian in nature; convert to little endiannes prior to output
+        for (auto u = 0U; u < SHA256_WC; ++u){
+            const uint w = m_vkSha256Result.data[u];
+            m_vkSha256Result.data[u] = SWOP_ENDS_U32( w );
         }
     }
 
@@ -554,36 +404,75 @@ void Reduction::Release(void) {
     Reset( );
 }
 
-class ReductionFactoryImpl : public ReductionFactory {
+class ReductionsImpl : public Reductions {
 public:
-    ReductionFactoryImpl(ComputeDevice&, vkmr::Pipeline&&);
-    virtual ~ReductionFactoryImpl() { m_pipeline = vkmr::Pipeline( ); }
+    ReductionsImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline):
+        m_vkDevice( *device ),
+        m_descriptorPool( device.CreateDescriptorPool( 1, 1 ) ),
+        m_commandPool( device.CreateCommandPool( ) ),
+        m_pipeline( ::std::move( pipeline ) ) { }
 
-    const vkmr::Pipeline& Pipeline(void) { return m_pipeline; }
-    ::std::unique_ptr<vkmr::Reduction> NewReduction(void);
+    virtual ~ReductionsImpl() {
+
+        m_container.clear( );
+        m_descriptorPool = DescriptorPool( );
+        m_commandPool = CommandPool( );
+        m_pipeline = vkmr::Pipeline( );
+    }
+
+    VkSha256Result Reduce(VkFence, VkQueue, Slice<VkSha256Result>&, ComputeDevice&);
 
 private:
-    ComputeDevice& m_device;
+    VkDevice m_vkDevice;
+
+    DescriptorPool m_descriptorPool;
+    CommandPool m_commandPool;
     vkmr::Pipeline m_pipeline;
+
+    ::std::vector<Reduction> m_container;
 };
 
-ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline):
-    m_device( device ),
-    m_pipeline( ::std::move( pipeline ) ) { }
+VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<VkSha256Result>& slice, ComputeDevice& device) {
 
-::std::unique_ptr<vkmr::Reduction> ReductionFactoryImpl::NewReduction(void) {
-    return std::unique_ptr<Reduction>(
-        new Reduction( *m_device, m_device.AllocateDescriptorSet( m_pipeline ), m_device.AllocateCommandBuffer( ) )
-    );
+    using ::std::cerr;
+    using ::std::endl;
+
+    // Get a reference to a reduction instance
+    if (m_container.empty( )){
+        m_container.push_back(
+            Reduction(
+                m_vkDevice,
+                m_descriptorPool.AllocateDescriptorSet( m_pipeline ),
+                m_commandPool.AllocateCommandBuffer( )
+            )
+        );
+    }
+    auto& reduction = m_container.front( );
+
+    // Apply the reduction
+    VkSha256Result vkSha256Result = {};
+    reduction.Apply( slice, device, m_pipeline );
+    auto vkResult = static_cast<VkResult>( reduction );
+    if (vkResult != VK_SUCCESS){
+        // Ack
+        cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( vkResult ) << endl;
+        return vkSha256Result;
+    }
+    vkResult = reduction.Dispatch( vkFence, vkQueue );
+    if (vkResult != VK_SUCCESS){
+        cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;
+        return vkSha256Result;
+    }
+    return static_cast<VkSha256Result>( reduction );
 }
 
-::std::unique_ptr<ReductionFactory> ReductionFactory::New(ComputeDevice& device) {
+::std::unique_ptr<Reductions> Reductions::New(ComputeDevice& device) {
 
     // Look for an early out
-    ::std::unique_ptr<ReductionFactory> factory;
+    ::std::unique_ptr<Reductions> reductions;
     auto vkDevice = *device;
     if (vkDevice == VK_NULL_HANDLE){
-        return factory;
+        return reductions;
     }
 
     // Prep
@@ -671,12 +560,12 @@ ReductionFactoryImpl::ReductionFactoryImpl(ComputeDevice& device, vkmr::Pipeline
 
     // Wrap it all up, maybe
     if (vkResult == VK_SUCCESS){
-        factory.reset( new ReductionFactoryImpl(
+        reductions.reset( new ReductionsImpl(
             device,
             vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, pWorkgroupSize )
         ) );
     }
-    return factory;
+    return reductions;
 }
 
 } // namespace vkmr
