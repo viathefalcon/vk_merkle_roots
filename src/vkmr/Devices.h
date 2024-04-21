@@ -18,8 +18,8 @@
 // C++ Standard Library Headers
 #include <vector>
 
-// Vulkan Headers
-#include <vulkan/vulkan.h>
+// Local Project Headers
+#include "Shaders.h"
 
 namespace vkmr {
 
@@ -82,6 +82,33 @@ private:
     VkCommandBuffer m_vkCommandBuffer;
 };
 
+// Encapsulates a command pool
+class CommandPool {
+public:
+    CommandPool(VkDevice, uint32_t);
+    CommandPool(CommandPool&&);
+    CommandPool(CommandPool const&) = delete;
+    CommandPool(void) { Reset( ); }
+    ~CommandPool(void) { Release( ); }
+
+    CommandPool& operator=(CommandPool&&);
+    CommandPool& operator=(CommandPool const&) = delete;
+    operator bool() const { return (m_vkCommandPool != VK_NULL_HANDLE); }
+    operator VkResult() const { return m_vkResult; }
+
+    // Allocate a new command buffer from the pool
+    CommandBuffer AllocateCommandBuffer(void);
+
+private:
+    void Reset(void);
+    void Release(void);
+
+    VkResult m_vkResult;
+    VkDevice m_vkDevice;
+
+    VkCommandPool m_vkCommandPool;
+};
+
 typedef struct {
     uint32_t memoryTypeIndex;
     VkDeviceSize vkMemoryBudget;
@@ -97,7 +124,7 @@ struct WorkgroupSize {
 // Encapsulates a pipeline
 class Pipeline {
 public:
-    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout, const WorkgroupSize* pWorkGroupSize = nullptr);
+    Pipeline(VkDevice, VkDescriptorSetLayout, VkPipelineLayout, ShaderModule&&, const WorkgroupSize* pWorkGroupSize = nullptr);
     Pipeline(Pipeline&&);
     Pipeline(Pipeline const&) = delete;
 
@@ -114,19 +141,49 @@ public:
     VkPipelineLayout Layout(void) const { return m_vkPipelineLayout; }
     const WorkgroupSize& GetWorkGroupSize(void) const { return m_workGroupSize; }
 
-    static VkPipelineLayout DefaultLayout(VkDevice, VkDescriptorSetLayout);
+    static VkPipelineLayout NewSimpleLayout(VkDevice, VkDescriptorSetLayout, const VkPushConstantRange* pVkPushConstantRange = nullptr);
 
 private:
     void Reset(void);
     void Release(void);
 
     VkDevice m_vkDevice;
-    VkShaderModule m_vkShaderModule;
     VkDescriptorSetLayout m_vkDescriptorSetLayout;
     VkPipelineLayout m_vkPipelineLayout;
     VkPipeline m_vkPipeline;
 
+    ShaderModule m_shaderModule;
     WorkgroupSize m_workGroupSize;
+};
+
+// Encapsulates a descriptor pool
+class DescriptorPool {
+public:
+    DescriptorPool(VkDevice, uint32_t, uint32_t);
+    DescriptorPool(DescriptorPool&&);
+    DescriptorPool(DescriptorPool const&) = delete;
+    DescriptorPool(void) { Reset( ); }
+    ~DescriptorPool(void) { Release( ); }
+
+    DescriptorPool& operator=(DescriptorPool&&);
+    DescriptorPool& operator=(DescriptorPool const&) = delete;
+    operator bool() const { return (m_vkDescriptorPool != VK_NULL_HANDLE); }
+    operator VkResult() const { return m_vkResult; }
+
+    // Returns the underlying descriptor pool
+    VkDescriptorPool operator * () const { return m_vkDescriptorPool; }
+
+    // Allocate a new descriptor set from the pool for the given pipeline
+    DescriptorSet AllocateDescriptorSet(Pipeline&) const;
+
+private:
+    void Reset(void);
+    void Release(void);
+
+    VkResult m_vkResult;
+    VkDevice m_vkDevice;
+
+    VkDescriptorPool m_vkDescriptorPool;
 };
 
 // Encapsulates a (logical, Vulkan) compute device
@@ -149,7 +206,13 @@ public:
     // Returns a handle to the physical device
     VkPhysicalDevice PhysicalDevice(void) const { return m_vkPhysicalDevice; }
 
-    // Returns the queue with the given index
+    // Creates a new descriptor pool
+    DescriptorPool CreateDescriptorPool(uint32_t, uint32_t) const;
+
+    // Creates a new command pool
+    CommandPool CreateCommandPool(void) const;
+
+    // Returns a handle to the queue with the given index
     VkQueue Queue(uint32_t) const;
 
     // Returns the memory requirement of storage buffers
@@ -161,15 +224,6 @@ public:
 
     // Returns the minimum alignment of a storage buffer offset
     VkDeviceSize MinStorageBufferOffset(void) const;
-
-    // Allocates and returns a descriptor set
-    DescriptorSet AllocateDescriptorSet(void) const;
-
-    // Allocates and returns a descriptor set for the given pipeline
-    DescriptorSet AllocateDescriptorSet(Pipeline&) const;
-
-    // Allocates and returns a command buffer
-    CommandBuffer AllocateCommandBuffer() const;
 
     // Returns the available memory types corresponding to the given requirements
     typedef ::std::vector<MemoryTypeBudget> MemoryTypeBudgets;
@@ -190,8 +244,6 @@ private:
 
     VkResult m_vkResult;
     VkDevice m_vkDevice;
-    VkCommandPool m_vkCommandPool;
-    VkDescriptorPool m_vkDescriptorPool;
 };
 
 } // namespace vkmr

@@ -16,83 +16,27 @@
 
 #if defined (VULKAN_SUPPORT)
 namespace vkmr {
-// Encapsulates a mapping of an input batch to a slice of device memory
-class Mapping {
+// Classes
+//
+
+// Encapsulates mappings of input batches to a slices of device memory
+class Mappings {
 public:
-    Mapping(Mapping&&);
-    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&);
-    Mapping(Mapping const&) = delete;
+    virtual ~Mappings(void) = default;
 
-    Mapping(void) { Reset( ); }
-    ~Mapping(void) { Release( ); }
+    virtual VkFence Map(Batch&, Slice<VkSha256Result>&, VkQueue) = 0;
 
-    Mapping& operator=(Mapping const&) = delete;
-    Mapping& operator=(Mapping&&);
-    operator bool() const { return (m_vkResult == VK_SUCCESS); }
-    operator VkResult() const { return m_vkResult; }
-
-    Mapping& Apply(Batch&, Slice<VkSha256Result>&, vkmr::Pipeline&);
-    VkResult Dispatch(VkQueue);
-
-    static vkmr::Pipeline Pipeline(ComputeDevice&);
-
-private:
-    void Reset(void);
-    void Release(void);
-
-    VkResult m_vkResult;
-    VkDevice m_vkDevice;
-    VkFence m_vkFence;
-
-    DescriptorSet m_descriptorSet;
-    CommandBuffer m_commandBuffer;
+    static ::std::unique_ptr<Mappings> New(ComputeDevice&);
 };
 
-// Encapsulates the reduction of a slice to a single value
-class Reduction {
+// Encapsulates reductions of slices of device memory to a single value
+class Reductions {
 public:
-    Reduction(Reduction&&);
-    Reduction(VkDevice, DescriptorSet&&, CommandBuffer&&);
-    Reduction(Reduction const&) = delete;
+    virtual ~Reductions(void) = default;
 
-    Reduction(void) { Reset( ); }
-    ~Reduction(void) { Release( ); }
+    virtual VkSha256Result Reduce(VkFence, VkQueue, Slice<VkSha256Result>&, ComputeDevice&) = 0;
 
-    Reduction& operator=(Reduction const&) = delete;
-    Reduction& operator=(Reduction&&);
-    operator bool() const { return (m_vkResult == VK_SUCCESS); }
-    operator VkResult() const { return m_vkResult; }
-
-    Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
-    VkResult Dispatch(VkQueue);
-
-private:
-    void Free(void);
-    void Reset(void);
-    void Release(void);
-
-    VkResult m_vkResult;
-    VkDevice m_vkDevice;
-    VkDeviceSize m_vkSize;
-    uint m_count;
-
-    VkFence m_vkFence;
-    VkBuffer m_vkBufferHost;
-    VkDeviceMemory m_vkHostMemory;
-
-    DescriptorSet m_descriptorSet;
-    CommandBuffer m_commandBuffer;
-};
-
-// A class of objects that can instantiate Reductions for a given compute device
-class ReductionFactory {
-public:
-    virtual ~ReductionFactory(void) = default;
-
-    virtual const vkmr::Pipeline& Pipeline(void) = 0;
-    virtual ::std::unique_ptr<vkmr::Reduction> NewReduction(void) = 0;
-
-    static ::std::unique_ptr<ReductionFactory> New(ComputeDevice&);
+    static ::std::unique_ptr<Reductions> New(ComputeDevice&);
 };
 
 } // namespace vkmr

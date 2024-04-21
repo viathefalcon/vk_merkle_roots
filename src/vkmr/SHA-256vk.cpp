@@ -73,8 +73,8 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
     vkCreateInfo.ppEnabledLayerNames = &szLayerName;
 
     // Add the validation extensions
-    instanceExtNames.push_back( "VK_EXT_validation_features" );
-    instanceExtNames.push_back( "VK_EXT_debug_utils" );
+    instanceExtNames.push_back( (char*) "VK_EXT_validation_features" );
+    instanceExtNames.push_back( (char*) "VK_EXT_debug_utils" );
 #endif
     vkCreateInfo.enabledExtensionCount = instanceExtNames.size( );
     vkCreateInfo.ppEnabledExtensionNames = instanceExtNames.data( );
@@ -117,7 +117,7 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
 
             std::cout << endl;
             std::cout << "Device #" << i << ": " << vkPhysicalDeviceProperties.deviceName << endl;
-            std::cout << "maxComputeWorkGroupSize: " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << endl;
+            std::cout << "maxComputeWorkGroupSize: (" << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[1] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[2] << ")" << endl;
             std::cout << "Device type: " << deviceType << endl;
 
             // Count
@@ -228,45 +228,38 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
     IVkSha256DInstance( name ),
     m_device( ::std::move( device ) ) {
 
-    m_mapping_pipeline = Mapping::Pipeline( m_device );
-    m_mapping = Mapping( *m_device, m_device.AllocateDescriptorSet( m_mapping_pipeline ), m_device.AllocateCommandBuffer( ) );
-    m_batch = Batch::New( m_device, 256 * 1024 * 1024 );
-    m_slice = slice_type::New( m_device, 256 * 1024 * 1024 );
-    m_reductions = ReductionFactory::New( m_device );
-    m_reduction = m_reductions->NewReduction( );
+    const VkDeviceSize Mega256 = (256 * 1024 * 1024);
+    m_batch = Batch::New( m_device, Mega256 );
+    m_slice = slice_type::New( m_device, Mega256 );
+    m_mappings = Mappings::New( m_device );
+    m_reductions = Reductions::New( m_device );
 }
 
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( ::std::move( instance.m_device ) ),
-    m_mapping_pipeline( ::std::move( instance.m_mapping_pipeline ) ),
-    m_mapping( ::std::move( instance.m_mapping ) ),
     m_batch( ::std::move( instance.m_batch ) ),
     m_slice( ::std::move( instance.m_slice ) ),
-    m_reductions( ::std::move( instance.m_reductions ) ),
-    m_reduction( ::std::move( instance.m_reduction ) ) {
+    m_mappings( ::std::move( instance.m_mappings ) ),
+    m_reductions( ::std::move( instance.m_reductions ) ) {
 }
 
 VkSha256D::Instance::~Instance() {
 
-    m_mapping_pipeline = Pipeline( );
-    m_mapping = Mapping( );
     m_batch = Batch( );
     m_slice = slice_type( );
+    m_mappings.reset( );
     m_reductions.reset( );
-    m_reduction.reset( );
 }
 
 VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instance) {
 
     m_name = instance.Name( );
     m_device = ::std::move( instance.m_device );
-    m_mapping_pipeline = ::std::move( instance.m_mapping_pipeline );
-    m_mapping = ::std::move( instance.m_mapping );
     m_batch = ::std::move( instance.m_batch );
     m_slice = ::std::move( instance.m_slice );
+    m_mappings = ::std::move( instance.m_mappings );
     m_reductions = ::std::move( instance.m_reductions );
-    m_reduction = ::std::move( instance.m_reduction );
     return (*this);
 }
 
@@ -282,32 +275,15 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
         return "<vkQueue>";
     }
 
-    // Apply the mapping from the batch to the slice
-    m_mapping.Apply( m_batch, m_slice, m_mapping_pipeline );
-    if (!m_mapping){
-        // Ack
-        cerr << "Failed to apply the mapping with error: " << static_cast<int64_t>( static_cast<VkResult>( m_mapping ) ) << endl;
+    // Map the inputs into the slice
+    auto mapping = m_mappings->Map( m_batch, m_slice, vkQueue );
+    if (mapping == VK_NULL_HANDLE){
         return "<mapping>";
-    }
-    auto vkResult = m_mapping.Dispatch( vkQueue );
-    if (vkResult != VK_SUCCESS){
-        cerr << "Failed to dispatch the mapping operation with error: " << static_cast<int64_t>( vkResult ) << endl;
-        return "<dispatch1>";
     }
 
     // Apply the reduction
-    const auto& applied = m_reduction->Apply( m_slice, m_device, m_reductions->Pipeline( ) );
-    if (!applied){
-        // Ack
-        cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( static_cast<VkResult>( applied ) ) << endl;
-        return "<reduction>";
-    }
-    vkResult = m_reduction->Dispatch( vkQueue );
-    if (vkResult != VK_SUCCESS){
-        cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;
-        return "<dispatch2>";
-    }
-    return "";
+    auto vkSha256Result = m_reductions->Reduce( mapping, vkQueue, m_slice, m_device );
+    return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {

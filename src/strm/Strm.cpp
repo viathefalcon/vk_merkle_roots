@@ -1,5 +1,5 @@
 // Strm.cpp: A simple program to accept string arguments on the command line and write them as
-//           a length-delimited stream to stdout
+//           a line-separated stream to stdout
 //
 
 // Includes

@@ -76,12 +76,10 @@ private:
     typedef Slice<VkSha256Result> slice_type;
 
     ComputeDevice m_device;
-    Pipeline m_mapping_pipeline;
-    Mapping m_mapping;
     Batch m_batch;
     slice_type m_slice;
-    ::std::unique_ptr<ReductionFactory> m_reductions;
-    ::std::unique_ptr<Reduction> m_reduction;
+    ::std::unique_ptr<Mappings> m_mappings;
+    ::std::unique_ptr<Reductions> m_reductions;
 };
 #endif // defined (VULKAN_SUPPORT)
 
