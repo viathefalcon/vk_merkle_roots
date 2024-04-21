@@ -18,8 +18,8 @@
 // C++ Standard Library Headers
 #include <vector>
 
-// Vulkan Headers
-#include <vulkan/vulkan.h>
+// Local Project Headers
+#include "Shaders.h"
 
 namespace vkmr {
 
@@ -124,7 +124,7 @@ struct WorkgroupSize {
 // Encapsulates a pipeline
 class Pipeline {
 public:
-    Pipeline(VkDevice, VkShaderModule, VkDescriptorSetLayout, VkPipelineLayout, const WorkgroupSize* pWorkGroupSize = nullptr);
+    Pipeline(VkDevice, VkDescriptorSetLayout, VkPipelineLayout, ShaderModule&&, const WorkgroupSize* pWorkGroupSize = nullptr);
     Pipeline(Pipeline&&);
     Pipeline(Pipeline const&) = delete;
 
@@ -141,18 +141,18 @@ public:
     VkPipelineLayout Layout(void) const { return m_vkPipelineLayout; }
     const WorkgroupSize& GetWorkGroupSize(void) const { return m_workGroupSize; }
 
-    static VkPipelineLayout DefaultLayout(VkDevice, VkDescriptorSetLayout);
+    static VkPipelineLayout NewSimpleLayout(VkDevice, VkDescriptorSetLayout, const VkPushConstantRange* pVkPushConstantRange = nullptr);
 
 private:
     void Reset(void);
     void Release(void);
 
     VkDevice m_vkDevice;
-    VkShaderModule m_vkShaderModule;
     VkDescriptorSetLayout m_vkDescriptorSetLayout;
     VkPipelineLayout m_vkPipelineLayout;
     VkPipeline m_vkPipeline;
 
+    ShaderModule m_shaderModule;
     WorkgroupSize m_workGroupSize;
 };
 

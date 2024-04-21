@@ -202,28 +202,17 @@ uint32_t WorkgroupSize::GetGroupCountX(uint32_t workItemCount) const {
         : (groupCount + 1);
 }
 
-Pipeline::Pipeline(Pipeline&& pipeline):
-    m_vkDevice( pipeline.m_vkDevice ),
-    m_vkShaderModule( pipeline.m_vkShaderModule ),
-    m_vkDescriptorSetLayout( pipeline.m_vkDescriptorSetLayout ),
-    m_vkPipelineLayout( pipeline.m_vkPipelineLayout ),
-    m_vkPipeline( pipeline.m_vkPipeline ),
-    m_workGroupSize( pipeline.m_workGroupSize ) {
-
-    pipeline.Reset( );
-}
-
 Pipeline::Pipeline(
     VkDevice vkDevice,
-    VkShaderModule vkShaderModule,
     VkDescriptorSetLayout vkDescriptorSetLayout,
     VkPipelineLayout vkPipelineLayout,
+    ShaderModule&& shaderModule,
     const WorkgroupSize* pWorkGroupSize):
     m_vkDevice( vkDevice ),
-    m_vkShaderModule( vkShaderModule ),
     m_vkDescriptorSetLayout( vkDescriptorSetLayout ),
     m_vkPipelineLayout( vkPipelineLayout ),
-    m_vkPipeline( VK_NULL_HANDLE ) {
+    m_vkPipeline( VK_NULL_HANDLE ),
+    m_shaderModule( ::std::move( shaderModule ) ) {
 
     // Check the pipeline layout
     if (m_vkPipelineLayout == VK_NULL_HANDLE){
@@ -265,7 +254,7 @@ Pipeline::Pipeline(
     VkPipelineShaderStageCreateInfo vkPipelineShaderStageCreateInfo = {};
     vkPipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    vkPipelineShaderStageCreateInfo.module = m_vkShaderModule;
+    vkPipelineShaderStageCreateInfo.module = *m_shaderModule;
     vkPipelineShaderStageCreateInfo.pName = "main";
     vkPipelineShaderStageCreateInfo.pSpecializationInfo = pSpecializationInfo;
     VkComputePipelineCreateInfo vkComputePipelineCreateInfo = {};
@@ -279,16 +268,27 @@ Pipeline::Pipeline(
     }
 }
 
+Pipeline::Pipeline(Pipeline&& pipeline):
+    m_vkDevice( pipeline.m_vkDevice ),
+    m_vkDescriptorSetLayout( pipeline.m_vkDescriptorSetLayout ),
+    m_vkPipelineLayout( pipeline.m_vkPipelineLayout ),
+    m_vkPipeline( pipeline.m_vkPipeline ),
+    m_shaderModule( ::std::move( pipeline.m_shaderModule ) ),
+    m_workGroupSize( pipeline.m_workGroupSize ) {
+
+    pipeline.Reset( );
+}
+
 Pipeline& Pipeline::operator=(Pipeline&& pipeline) {
 
     if (this != &pipeline){
         this->Release( );
 
         m_vkDevice = pipeline.m_vkDevice;
-        m_vkShaderModule = pipeline.m_vkShaderModule;
         m_vkDescriptorSetLayout = pipeline.m_vkDescriptorSetLayout;
         m_vkPipelineLayout = pipeline.m_vkPipelineLayout;
         m_vkPipeline = pipeline.m_vkPipeline;
+        m_shaderModule = ::std::move( pipeline.m_shaderModule );
         m_workGroupSize = pipeline.m_workGroupSize;
 
         pipeline.Reset( );
@@ -296,13 +296,17 @@ Pipeline& Pipeline::operator=(Pipeline&& pipeline) {
     return (*this);
 }
 
-VkPipelineLayout Pipeline::DefaultLayout(VkDevice vkDevice, VkDescriptorSetLayout vkDescriptorSetLayout) {
+VkPipelineLayout Pipeline::NewSimpleLayout(VkDevice vkDevice, VkDescriptorSetLayout vkDescriptorSetLayout, const VkPushConstantRange* pVkPushConstantRange) {
 
     VkPipelineLayout vkPipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
     vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     vkPipelineLayoutCreateInfo.setLayoutCount = 1;
     vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout;
+    if (pVkPushConstantRange){
+        vkPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+        vkPipelineLayoutCreateInfo.pPushConstantRanges = pVkPushConstantRange;
+    }
     VkResult vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
     return (vkResult == VK_SUCCESS) ? vkPipelineLayout : VK_NULL_HANDLE;
 }
@@ -310,7 +314,6 @@ VkPipelineLayout Pipeline::DefaultLayout(VkDevice vkDevice, VkDescriptorSetLayou
 void Pipeline::Reset(void) {
 
     m_vkDevice = VK_NULL_HANDLE;
-    m_vkShaderModule = VK_NULL_HANDLE;
     m_vkDescriptorSetLayout = VK_NULL_HANDLE;
     m_vkPipelineLayout = VK_NULL_HANDLE;
     m_vkPipeline = VK_NULL_HANDLE;
@@ -329,9 +332,7 @@ void Pipeline::Release(void) {
     if (m_vkDescriptorSetLayout != VK_NULL_HANDLE){
         ::vkDestroyDescriptorSetLayout( m_vkDevice, m_vkDescriptorSetLayout, pAllocator );
     }
-    if (m_vkShaderModule != VK_NULL_HANDLE){
-        ::vkDestroyShaderModule( m_vkDevice, m_vkShaderModule, pAllocator );
-    }
+    m_shaderModule = ShaderModule( );
     Reset( );
 }
 

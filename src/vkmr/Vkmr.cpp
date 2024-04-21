@@ -79,8 +79,8 @@ int main(int argc, const char* argv[]) {
             cout << instance.Name( ) << ":" << endl;
             StopWatch sw;
             sw.Start( );
-            const auto root = instance.Root( );
-            cout << root << " (" << sw.Elapsed( ) << ")" << endl;
+            const auto gpu_root = instance.Root( );
+            cout << gpu_root << " (" << sw.Elapsed( ) << ")" << endl;
         } );
 #endif
     }

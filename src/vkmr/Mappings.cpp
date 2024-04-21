@@ -7,9 +7,8 @@
 // C++ Standard Library Headers
 #include <vector>
 #include <cstring>
-#include <iostream>
-#include <fstream>
 #include <utility>
+#include <iostream>
 
 // Declarations
 #include "Ops.h"
@@ -154,8 +153,18 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
         host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
         g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
+        // Push the constants
+        struct {
+            uint bound;
+        } pc;
+        pc.bound = batch.Count( );
+        ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
+
+        // Figure out the number of workgroups
+        const auto x = pipeline.GetWorkGroupSize( ).GetGroupCountX( pc.bound );
+
         // Actually dispatch the shader invocations
-        ::vkCmdDispatch( vkCommandBuffer, static_cast<uint32_t>( batch.Count( ) ), 1, 1 );
+        ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }
     return (*this);
@@ -272,22 +281,9 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
     // Prep
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
 
-    // Load the shader code
-    ::std::ifstream ifs( "SHA-256-n.spv", ::std::ios::binary | ::std::ios::ate );
-    const auto g = ifs.tellg( );
-    ifs.seekg( 0 );
-    std::vector<uint32_t> shaderCode( g / sizeof( uint32_t ) );
-    ifs.read( reinterpret_cast<char*>( shaderCode.data( ) ), g );
-    ifs.close( );
-    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code." << ::std::endl;
-
-    // Create the shader module
-    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
-    VkShaderModuleCreateInfo vkShaderModuleCreateInfo = {};
-    vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vkShaderModuleCreateInfo.codeSize = shaderCode.size( ) * sizeof( uint32_t );
-    vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( shaderCode.data( ) );
-    VkResult vkResult = ::vkCreateShaderModule( vkDevice, &vkShaderModuleCreateInfo, pAllocator, &vkShaderModule );
+    // Load the shader code, wrap it in a module, etc
+    ShaderModule shaderModule( vkDevice, "SHA-256-n.spv" );
+    auto vkResult = static_cast<VkResult>( shaderModule );
 
     // Create the descriptor set layout
     VkDescriptorSetLayout vkDescriptorSetLayout = VK_NULL_HANDLE;
@@ -318,15 +314,35 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
         );
     }
 
+    WorkgroupSize workgroupSize;
+    workgroupSize.x = workgroupSize.y = workgroupSize.z = 1;
+    if (vkResult == VK_SUCCESS){
+        // Query for the device limits
+        VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
+        vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
+
+        // Figure out how big the work group can be in the x-dimension
+        workgroupSize.x = ::std::min(
+            vkPhysicalDeviceProperties2.properties.limits.maxComputeWorkGroupSize[0],
+            vkPhysicalDeviceProperties2.properties.limits.maxComputeWorkGroupInvocations
+        );
+    }
+
     // Wrap it all up, maybe
     if (vkResult == VK_SUCCESS){
+        VkPushConstantRange vkPushConstantRange = {};
+        vkPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        vkPushConstantRange.offset = 0;
+        vkPushConstantRange.size = sizeof( uint );
         mappings.reset( new MappingsImpl(
             device,
             vkmr::Pipeline(
                 vkDevice,
-                vkShaderModule,
                 vkDescriptorSetLayout,
-                vkmr::Pipeline::DefaultLayout( vkDevice, vkDescriptorSetLayout )
+                vkmr::Pipeline::NewSimpleLayout( vkDevice, vkDescriptorSetLayout, &vkPushConstantRange ),
+                ::std::move( shaderModule ),
+                &workgroupSize
             )
         ) );
     }

@@ -8,7 +8,6 @@
 #include <vector>
 #include <cstring>
 #include <iostream>
-#include <fstream>
 #include <utility>
 
 // Declarations
@@ -504,23 +503,10 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         pWorkgroupSize = &workgroupSize;
     }
 
-    // Load the shader code
+    // Load the shader code, wrap it in a module, etc
     const auto shaderCodePath = subgroupsSupported ? "SHA-256-2-be-subgroups.spv" : "SHA-256-2-be.spv";
-    ::std::ifstream ifs( shaderCodePath, ::std::ios::binary | ::std::ios::ate );
-    const auto g = ifs.tellg( );
-    ifs.seekg( 0 );
-    std::vector<uint32_t> shaderCode( g / sizeof( uint32_t ) );
-    ifs.read( reinterpret_cast<char*>( shaderCode.data( ) ), g );
-    ifs.close( );
-    ::std::cout << "Loaded " << shaderCode.size() << " (32-bit) word(s) of shader code from " << shaderCodePath << ::std::endl;
-
-    // Create the shader module
-    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
-    VkShaderModuleCreateInfo vkShaderModuleCreateInfo = {};
-    vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vkShaderModuleCreateInfo.codeSize = shaderCode.size( ) * sizeof( uint32_t );
-    vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>( shaderCode.data( ) );
-    VkResult vkResult = ::vkCreateShaderModule( vkDevice, &vkShaderModuleCreateInfo, pAllocator, &vkShaderModule );
+    ShaderModule shaderModule( vkDevice, shaderCodePath );
+    auto vkResult = static_cast<VkResult>( shaderModule );
 
     // Create the descriptor set layout
     VkDescriptorSetLayout vkDescriptorSetLayout = VK_NULL_HANDLE;
@@ -540,8 +526,7 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         vkResult = ::vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &vkDescriptorSetLayout );
     }
 
-    // Create the pipeline layout
-    VkPipelineLayout vkPipelineLayout = VK_NULL_HANDLE;
+    // Wrap it all up, maybe
     if (vkResult == VK_SUCCESS){
         // c.f. https://docs.vulkan.org/guide/latest/push_constants.html
         VkPushConstantRange vkPushConstantRange = {};
@@ -549,20 +534,15 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         vkPushConstantRange.offset = 0;
         vkPushConstantRange.size = (sizeof( uint ) * 3);
 
-        VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo = {};
-        vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        vkPipelineLayoutCreateInfo.setLayoutCount = 1;
-        vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout;
-        vkPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-        vkPipelineLayoutCreateInfo.pPushConstantRanges = &vkPushConstantRange;
-        vkResult = ::vkCreatePipelineLayout( vkDevice, &vkPipelineLayoutCreateInfo, VK_NULL_HANDLE, &vkPipelineLayout );
-    }
-
-    // Wrap it all up, maybe
-    if (vkResult == VK_SUCCESS){
         reductions.reset( new ReductionsImpl(
             device,
-            vkmr::Pipeline( vkDevice, vkShaderModule, vkDescriptorSetLayout, vkPipelineLayout, pWorkgroupSize )
+            vkmr::Pipeline(
+                vkDevice,
+                vkDescriptorSetLayout,
+                vkmr::Pipeline::NewSimpleLayout( vkDevice, vkDescriptorSetLayout, &vkPushConstantRange ),
+                ::std::move( shaderModule ),
+                pWorkgroupSize
+            )
         ) );
     }
     return reductions;
