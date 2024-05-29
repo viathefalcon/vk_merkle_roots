@@ -67,7 +67,7 @@
                 "${workspaceFolder}\\src\\shaders\\SHA-256.comp",
                 "--target-env=vulkan1.2",
                 "-D_SHA_256_2_BE_",
-                "-D_VKMR_BASIC_SUBGROUPS_",
+                "-D_VKMR_BY_SUBGROUP_",
                 "-g",
                 "-o",
                 "${workspaceFolder}\\bin\\SHA-256-2-be-subgroups.spv"
@@ -186,7 +186,7 @@
                 "${workspaceFolder}/src/shaders/SHA-256.comp",
                 "--target-env=vulkan1.2",
                 "-D_SHA_256_2_BE_",
-                "-D_VKMR_BASIC_SUBGROUPS_",
+                "-D_VKMR_BY_SUBGROUP_",
                 "-o",
                 "${workspaceFolder}/bin/SHA-256-2-be-subgroups.spv"
             ],

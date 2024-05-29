@@ -40,7 +40,7 @@ class VkSha256D {
 public:
     class Instance;
 
-    VkSha256D();
+    VkSha256D(const ::std::string&);
     ~VkSha256D();
 
     operator bool() const;

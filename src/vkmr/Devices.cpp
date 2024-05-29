@@ -221,9 +221,15 @@ Pipeline::Pipeline(
         return;
     }
 
+    // Initialise the compute pipeline
+    VkPipelineShaderStageCreateInfo vkPipelineShaderStageCreateInfo = {};
+    vkPipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    vkPipelineShaderStageCreateInfo.module = *m_shaderModule;
+    vkPipelineShaderStageCreateInfo.pName = "main";
+
     // Capture the work group size, if provided
     VkSpecializationInfo specializationInfo = {};
-    VkSpecializationInfo* pSpecializationInfo = VK_NULL_HANDLE;
     if (pWorkGroupSize == nullptr){
         m_workGroupSize.x = m_workGroupSize.y = m_workGroupSize.z = 1U;
     }else{
@@ -247,16 +253,21 @@ Pipeline::Pipeline(
         specializationInfo.pMapEntries = vkSpecializationMapEntries;
         specializationInfo.dataSize = sizeof( workgroupSize );
         specializationInfo.pData = workgroupSize;
-        pSpecializationInfo = &specializationInfo;
+
+        // Apply to the pipeline
+        vkPipelineShaderStageCreateInfo.pSpecializationInfo = &specializationInfo;
     }
 
-    // Initialise the compute pipeline
-    VkPipelineShaderStageCreateInfo vkPipelineShaderStageCreateInfo = {};
-    vkPipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vkPipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    vkPipelineShaderStageCreateInfo.module = *m_shaderModule;
-    vkPipelineShaderStageCreateInfo.pName = "main";
-    vkPipelineShaderStageCreateInfo.pSpecializationInfo = pSpecializationInfo;
+    // Set the required workgroup size, if specified
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo requiredSubgroupSizeCreateInfo = {};
+    const auto subgroupsRequired = (pWorkGroupSize == nullptr) ? false : pWorkGroupSize->bySubgroup;
+    if (subgroupsRequired){
+        requiredSubgroupSizeCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
+        requiredSubgroupSizeCreateInfo.requiredSubgroupSize = (pWorkGroupSize->x * pWorkGroupSize->y *pWorkGroupSize->z);
+        vkPipelineShaderStageCreateInfo.pNext = &requiredSubgroupSizeCreateInfo;
+    }
+
+    // Create the compute pipeline
     VkComputePipelineCreateInfo vkComputePipelineCreateInfo = {};
     vkComputePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     vkComputePipelineCreateInfo.stage = vkPipelineShaderStageCreateInfo;
@@ -419,7 +430,8 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
                 (char*) VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
                 (char*) VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
                 (char*) VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
-                (char*) VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+                (char*) VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+                (char*) VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
             };
             vkEnumerateDeviceExtensionProperties( vkPhysicalDevice, VK_NULL_HANDLE, &uDeviceExtensionPropertyCount, pVkExtensionProperties );
             for (decltype(uDeviceExtensionPropertyCount) u = 0; (!requestedExtNames.empty( )) && (u < uDeviceExtensionPropertyCount); ++u){
@@ -451,6 +463,12 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
     vkPhysicalDeviceSynchronization2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     vkPhysicalDeviceSynchronization2Features.synchronization2 = VK_TRUE;
 
+    // Enable the subgroup size control features
+    VkPhysicalDeviceSubgroupSizeControlFeatures subgroupSizeControlFeatures = {};
+    subgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    subgroupSizeControlFeatures.subgroupSizeControl = VK_TRUE;
+    subgroupSizeControlFeatures.pNext = &vkPhysicalDeviceSynchronization2Features;
+
     // Try and create the device along w/all the queues..
     vector<float> queuePriorities(queueCount, 1.0f);
     VkDeviceQueueCreateInfo vkDeviceQueueCreateInfo = {};
@@ -460,7 +478,7 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
     vkDeviceQueueCreateInfo.pQueuePriorities = queuePriorities.data( );
     VkDeviceCreateInfo vkDeviceCreateInfo = {};
     vkDeviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    vkDeviceCreateInfo.pNext = &vkPhysicalDeviceSynchronization2Features;
+    vkDeviceCreateInfo.pNext = &subgroupSizeControlFeatures;
     vkDeviceCreateInfo.queueCreateInfoCount = 1;
     vkDeviceCreateInfo.pQueueCreateInfos = &vkDeviceQueueCreateInfo;
     if (!deviceExtNames.empty( )){
