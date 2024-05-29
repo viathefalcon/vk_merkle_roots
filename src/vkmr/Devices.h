@@ -117,6 +117,7 @@ typedef struct {
 
 struct WorkgroupSize {
     uint32_t x, y, z;
+    bool bySubgroup = false;
 
     uint32_t GetGroupCountX(uint32_t) const;
 };

@@ -48,22 +48,33 @@ layout(std430, set = 0, binding = 2) writeonly buffer result_layout
 };
 #endif // _SHA_256_N_
 
-#ifdef _VKMR_BASIC_SUBGROUPS_
+#ifdef _SHA_256_2_BE_
+#ifdef _VKMR_BY_SUBGROUP_
 #extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_shuffle_relative: enable
+
+layout(constant_id = 0) const uint localSizeX = 64;
+layout(constant_id = 1) const uint localSizeY = 1;
+layout(constant_id = 2) const uint localSizeZ = 1;
 
 layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
-#endif // _VKMR_BASIC_SUBGROUPS_
 
-#ifdef _SHA_256_2_BE_
-layout(std430, set = 0, binding = 0) buffer leaf_layout
-{
-    VkSha256Result leaf[];
+layout(push_constant, std430) uniform pc {
+    uint pairs;
+    uint delta;
+    uint bound;
 };
-
+#else
 layout(push_constant, std430) uniform pc {
     uint pass;
     uint delta;
     uint bound;
+};
+#endif // _VKMR_BY_SUBGROUP_
+
+layout(std430, set = 0, binding = 0) buffer leaf_layout
+{
+    VkSha256Result leaf[];
 };
 #endif // _SHA_256_2_BE_
 
@@ -295,8 +306,96 @@ void main() {
 #endif // _SHA_256_N_
 
 #ifdef _SHA_256_2_BE_
-void main() {
+#ifdef _VKMR_BY_SUBGROUP_
+void sha256_be_2(inout uvec4 H1, inout uvec4 H2) {
+    H1 = Hinitial1;
+    H2 = Hinitial2;
+    sha256_be_round( H1, H2 );
 
+    // Prep and process the second message block
+    M[0] = 0x80000000;
+    for (uint u = 1; u < (SHA256_MESSAGE_BLOCK_WC-1); ++u){
+        M[u] = 0U;
+    }
+    M[SHA256_MESSAGE_BLOCK_WC-1] = 512;
+    sha256_be_round( H1, H2 );
+
+    // Apply the second round of hashing
+    sha256_be_1( H1, H2 );
+}
+
+void main() {
+    // Calc the index into the input data for the current invocation.
+    // We clamp this to the bounds of the input data so every invocation
+    // at or past this point will end up calculating the root of the
+    // same sub-tree (but we only care about the first invocation)
+    uint w = gl_GlobalInvocationID.x * (delta << 1);
+    uint v = (bound - 1);
+    const uint idx = (w < bound) ? w : v;
+
+    // Prep the first message block
+    uint u;
+    for (u = 0, v = 0, w = idx; u < SHA256_WC; ++u, ++v){
+        M[v] = leaf[w].data[u];
+    }
+    w += (((bound - w) > delta) ? delta : 0);
+    for (u = 0; u < SHA256_WC; ++u, ++v){
+        M[v] = leaf[w].data[u];
+    }
+
+    // Calc the number of invocations beyond the current (sub)group,
+    // and use to calculate the maximum distance of a shuffle down op
+    v = (pairs - (gl_GlobalInvocationID.x - gl_LocalInvocationID.x));
+    uint maxShuffleDist = ((v < localSizeX) ? v : localSizeX);
+    maxShuffleDist -= (gl_LocalInvocationID.x + 1);
+
+    // Loop until we have reduced to one active invocation, where
+    // the number of such invocations is the smaller of the sizes
+    // of the workgroup and the problem space (expressed as the
+    // number of pairs of inputs)
+    uvec4 H1, H2;
+    for (uint dx = 1, invocations = (pairs < localSizeX) ? pairs : localSizeX; invocations > 1; dx <<= 1 ){
+        // Hash the contents of the message block
+        sha256_be_2( H1, H2 );
+
+        // Copy into (first half of) the message block
+        for (u = 0; u < SHA256_WC_HALF; ++u){
+            M[u] = H1[u];
+        }
+        for (v = 0; v < SHA256_WC_HALF; ++u, ++v){
+            M[u] = H2[v];
+        }
+
+        // Now, figure out the relative index of the thread
+        // from which we want to grab the other half of the
+        // input to the next iteration
+        w = (dx <= maxShuffleDist) ? dx : 0;
+
+        // Fetch and append to the message block
+        uvec4 h = subgroupShuffleDown( H1, w );
+        for (v = 0; v < SHA256_WC_HALF; ++u, ++v){
+            M[u] = h[v];
+        }
+        h = subgroupShuffleDown( H2, w );
+        for (v = 0; v < SHA256_WC_HALF; ++u, ++v){
+            M[u] = h[v];
+        }
+
+        // Halve the number of active invocations
+        invocations = (((invocations % 2) == 0) ? invocations : (invocations + 1)) >> 1;
+    }
+
+    // Do the last hash op, and copy out the result
+    sha256_be_2( H1, H2 );
+    for (u = 0; u < SHA256_WC_HALF; ++u){
+        leaf[idx].data[u] = H1[u];
+    }
+    for (v = 0; v < SHA256_WC_HALF; ++u, ++v){
+        leaf[idx].data[u] = H2[v];
+    }
+}
+#else
+void main() {
     // Bounds check
     const uint idx = gl_GlobalInvocationID.x << pass;
     if (idx > bound){
@@ -338,4 +437,5 @@ void main() {
         //debugPrintfEXT("%u => %08x, %08x\n", u, H2[v], leaf[w].data[u]);
     }
 }
+#endif // _VKMR_BY_SUBGROUP_
 #endif // _SHA_256_2_BE_

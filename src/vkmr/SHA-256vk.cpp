@@ -14,6 +14,7 @@
 // C++ Standard Headers
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 #include <utility>
 
 #if defined (VULKAN_SUPPORT)
@@ -39,7 +40,7 @@ namespace vkmr {
 // Class(es)
 //
 
-VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
+VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
 
     using ::std::endl;
 
@@ -106,19 +107,13 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
             VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
             ::vkGetPhysicalDeviceProperties( vkPhysicalDevice, &vkPhysicalDeviceProperties );
 
-            // Restrict to devices which declare themselves to be actual GPUs
-            // (and not, say, virtual GPUs, CPUs, etc)
-            const auto gpuDeviceTypeMask = int(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) | int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
-            const auto deviceType = int(vkPhysicalDeviceProperties.deviceType);
-            if ((deviceType & gpuDeviceTypeMask) != deviceType){
-                std::cerr << "Skipping non-GPU device: " << vkPhysicalDeviceProperties.deviceName << endl;
-                continue;
-            }
-
-            std::cout << endl;
-            std::cout << "Device #" << i << ": " << vkPhysicalDeviceProperties.deviceName << endl;
-            std::cout << "maxComputeWorkGroupSize: (" << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[1] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[2] << ")" << endl;
-            std::cout << "Device type: " << deviceType << endl;
+            ::std::ostringstream oss;
+            oss << endl;
+            oss << "Device #" << i << ": " << vkPhysicalDeviceProperties.deviceName << endl;
+            oss << "maxComputeWorkGroupSize: (" << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[1] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[2] << ")" << endl;
+            oss << "maxComputeWorkGroupInvocations: " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupInvocations << endl;
+            oss << "maxComputeWorkGroupCount: (" << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[1] << ", " << vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[2] << ")" << endl;
+            oss << "Device type: " << int(vkPhysicalDeviceProperties.deviceType) << endl;
 
             // Count
             uint32_t vkQueueFamilyCount = 0;
@@ -132,38 +127,47 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
             uint32_t queueCount = 0, queueFamily = vkQueueFamilyCount;
             for (decltype(vkQueueFamilyCount) j = 0; j < vkQueueFamilyCount; ++j){
                 VkQueueFamilyProperties*  vkQueueFamilyProps = (vkQueueFamilyProperties + j);
-                std::cout << "Queue family #" << j << " supports ";
+                oss << "Queue family #" << j << " supports ";
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_GRAPHICS_BIT){
-                    std::cout << "graphics ";
+                    oss << "graphics ";
                 }
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_COMPUTE_BIT){
-                    std::cout << "compute ";
+                    oss << "compute ";
                     if (vkQueueFamilyProps->queueCount > queueCount){
                         queueFamily = j;
                         queueCount = vkQueueFamilyProps->queueCount;
                     }
                 }
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_TRANSFER_BIT){
-                    std::cout << "transfer ";
+                    oss << "transfer ";
                 }
-                std::cout << "on " << vkQueueFamilyProps->queueCount << " queue(s)." << endl;
+                oss << "(" << int(vkQueueFamilyProps->queueFlags) << ") on " << vkQueueFamilyProps->queueCount << " queue(s)." << endl;
             }
             delete[] vkQueueFamilyProperties;
-            std::cout << endl;
 
             // Look for an early out
             if (queueFamily >= vkQueueFamilyCount){
+                ::std::cout << oss.str( );
                 ::std::cerr << "Failed to find a compute queue; skipping this device." << endl;
                 continue;
             }
-            std::cout << "Selected queue family #" << queueFamily << endl;
+            oss << "Selected queue family #" << queueFamily << endl;
+
+            // If the caller specified a name, then check that it matches
+            // the device's declared name
+            const auto deviceName = ::std::string( vkPhysicalDeviceProperties.deviceName );
+            if (!name.empty( )){
+                if (deviceName != name){
+                    continue;
+                }
+            }
+            ::std::cout << oss.str( ) << endl;
 
             // Create us a device to do the computation
             ComputeDevice device( vkPhysicalDevice, queueFamily, queueCount );
             if (static_cast<VkResult>( device ) == VK_SUCCESS){
                 // Wrap up and accumulate
-                const auto name = ::std::string( vkPhysicalDeviceProperties.deviceName );
-                m_instances.push_back( Instance( name, ::std::move( device ) ) );
+                m_instances.push_back( Instance( deviceName, ::std::move( device ) ) );
                 continue;
             }
             ::std::cerr << "Failed to create a logical compute device on Vulkan" << std::endl;

@@ -39,8 +39,16 @@ int main(int argc, const char* argv[]) {
 
     vkmr::CpuSha256D mrc;
 #if defined (VULKAN_SUPPORT)
-    cout << "Initializing.." << endl;
-    vkmr::VkSha256D instances;
+    cout << "Initializing";
+    std::string arg1;
+    if (argc > 1){
+        arg1.append( argv[1] );
+        cout << " for " << arg1;
+    }else{
+        cout << "..";
+    }
+    cout << endl;;
+    vkmr::VkSha256D instances( arg1 );
 #endif
 
     // Loop over the inputs

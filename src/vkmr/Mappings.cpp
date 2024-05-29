@@ -153,15 +153,12 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
         host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
         g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
-        // Push the constants
-        struct {
-            uint bound;
-        } pc;
-        pc.bound = batch.Count( );
-        ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
+        // Set the bound
+        const auto bound = static_cast<uint>( batch.Count( ) );
+        ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( bound ), &bound );
 
         // Figure out the number of workgroups
-        const auto x = pipeline.GetWorkGroupSize( ).GetGroupCountX( pc.bound );
+        const auto x = pipeline.GetWorkGroupSize( ).GetGroupCountX( bound );
 
         // Actually dispatch the shader invocations
         ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );

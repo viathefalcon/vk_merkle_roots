@@ -4,6 +4,9 @@
 // Macros
 //
 
+#ifndef _SHA256_DEFS_H_
+#define _SHA256_DEFS_H_
+
 #define SWOP_ENDS_U32(x) \
     (((x) >> 24) & 0x000000FF) | \
     (((x) >> 8) & 0x0000FF00) | \
@@ -30,6 +33,7 @@
 #define SHA256_MESSAGE_BLOCK_BYTE_SIZE   (512 >> 3)
 #define SHA256_MESSAGE_BLOCK_WC          (SHA256_MESSAGE_BLOCK_BYTE_SIZE >> 2)
 #define SHA256_WC                        8
+#define SHA256_WC_HALF                   4
 
 // Types
 //
@@ -48,3 +52,5 @@ struct VkSha256Metadata {
     uint start;
     uint size;
 };
+
+#endif // _SHA256_DEFS_H_
