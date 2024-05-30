@@ -29,6 +29,7 @@
 layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 layout(push_constant, std430) uniform pc {
+    uint offset;
     uint bound;
 };
 
@@ -181,7 +182,7 @@ void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
 void main() {
 
     // Bounds check
-    const uint gid = gl_GlobalInvocationID.x;
+    const uint gid = (offset + gl_GlobalInvocationID.x);
     if (gid > bound){
         return;
     }
