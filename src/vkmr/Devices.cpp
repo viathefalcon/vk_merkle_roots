@@ -427,8 +427,6 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
         VkExtensionProperties* pVkExtensionProperties = new (std::nothrow) VkExtensionProperties[uDeviceExtensionPropertyCount];
         if (pVkExtensionProperties){
             decltype(deviceExtNames) requestedExtNames = {
-                (char*) VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-                (char*) VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
                 (char*) VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
                 (char*) VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
                 (char*) VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME

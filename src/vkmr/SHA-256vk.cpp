@@ -141,7 +141,7 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
                 if (vkQueueFamilyProps->queueFlags & VK_QUEUE_TRANSFER_BIT){
                     oss << "transfer ";
                 }
-                oss << "(" << int(vkQueueFamilyProps->queueFlags) << ") on " << vkQueueFamilyProps->queueCount << " queue(s)." << endl;
+                oss << "(0x" << ::std::hex << int(vkQueueFamilyProps->queueFlags) << ::std::dec << ") on " << vkQueueFamilyProps->queueCount << " queue(s)." << endl;
             }
             delete[] vkQueueFamilyProperties;
 
