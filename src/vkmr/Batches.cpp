@@ -14,20 +14,17 @@
 #include "Batches.h"
 
 #if defined (VULKAN_SUPPORT)
+static const VkAllocationCallbacks *c_pAllocator = VK_NULL_HANDLE;
+
 namespace vkmr {
 
 // Classes
 //
 
 Batch::Batch(Batch&& batch):
-    m_vkDevice( batch.m_vkDevice ),
-    m_vkBuffer( batch.m_vkBuffer ),
-    m_vkDeviceMemory( batch.m_vkDeviceMemory ),
-    m_vkSize( batch.m_vkSize ),
-    m_minStorageBufferOffsetAlignment( batch.m_minStorageBufferOffsetAlignment ),
-    m_pData( batch.m_pData ),
-    m_count( batch.m_count ),
-    m_metadata_offset( batch.m_metadata_offset ) {
+    m_data( ::std::move( batch.m_data ) ),
+    m_metadata( ::std::move( batch.m_metadata ) ),
+    m_count( batch.m_count ) {
 
     batch.Reset( );
 }
@@ -37,27 +34,13 @@ Batch& Batch::operator=(Batch&& batch) {
     if (this != &batch){
         Release( );
 
-        m_vkDevice = batch.m_vkDevice;
-        m_vkBuffer = batch.m_vkBuffer;
-        m_vkDeviceMemory = batch.m_vkDeviceMemory;
-        m_vkSize = batch.m_vkSize;
-        m_minStorageBufferOffsetAlignment = batch.m_minStorageBufferOffsetAlignment;
-        m_pData = batch.m_pData;
+        m_data = ::std::move( batch.m_data );
+        m_metadata = ::std::move( batch.m_metadata );
         m_count = batch.m_count;
-        m_metadata_offset = batch.m_metadata_offset;
 
         batch.Reset( );
     }
     return (*this);
-}
-
-void Batch::Reuse(void) {
-
-    // Apparently important on Steam Deck..?
-    ::std::memset( m_pData, 0, m_vkSize ); 
-
-    // Set the initial position of the metadata relative to the start of the buffer
-    m_metadata_offset = AlignOffset( m_vkSize / 2, sizeof( VkSha256Metadata ) );
 }
 
 bool Batch::Push(const char* str, size_t len) {
@@ -69,73 +52,36 @@ bool Batch::Push(const char* str, size_t len) {
     if (!str || (len == 0)){
         return true; // Silently skip
     }
-
-    // Setup
     using ::std::memcpy;
-    const auto wc = WordCount( len );
+
+    // Is there space for the metadata
     const auto new_metadata_size = (sizeof( VkSha256Metadata ) * (m_count + 1));
-
-    auto ptr = static_cast<unsigned char*>( m_pData );
-    auto metadata_offset = m_metadata_offset;
-
-    // Check if we can accomodate the string + metadata
-    VkSha256Metadata back = { 0 };
-    if (m_count > 0){
-        // Copy onto the stack
-        memcpy(
-            &back,
-            ptr + m_metadata_offset + ((m_count - 1) * sizeof( VkSha256Metadata )),
-            sizeof( VkSha256Metadata )
-        );
-
-        // Calculate where we would need to put the metadata block,
-        // and then check if the metadata would fit there (i.e. not
-        // overrun the end of the buffer)
-        metadata_offset = AlignOffset(
-            back.start + WordCount( back.size ) + wc,
-            sizeof( VkSha256Metadata )
-        );
-        if ((metadata_offset + new_metadata_size) > m_vkSize){
-            // Nope
-            return false;
-        }
+    if (new_metadata_size > m_metadata.vkSize){
+        // Nope
+        return false;
     }
 
-    // If we get here, then we can accomodate the string, so start copying
-    // things into place
-    if (metadata_offset > m_metadata_offset){
-        // To reduce the number of moves within the lifetime of the batch
-        // try to bisect the available space
-        const auto alt_offset = AlignOffset(
-            (m_vkSize - (back.start + WordCount( back.size ) + wc + new_metadata_size)) / 2,
-            sizeof( VkSha256Metadata )
-        );
-        if ((alt_offset + new_metadata_size) < m_vkSize){
-            metadata_offset = alt_offset;
-        }
-
-        // Move the metadata block to allow us to append the string
-        // without overrwriting the metadata
-        ::std::memmove(
-            ptr + metadata_offset,
-            ptr + m_metadata_offset,
-            sizeof( VkSha256Metadata ) * m_count
-        );
-        m_metadata_offset = metadata_offset;
+    // Is there space for the string itself
+    auto back = this->Back( );
+    const auto wc = WordCount( len );
+    const auto new_data_size = sizeof( uint ) * (back.start + WordCount( back.size ) + wc);
+    if (new_data_size > m_data.vkSize){
+        // Nope
+        return false;
     }
 
     // Append the metadata
     back.start = (back.start + WordCount( back.size ));
     back.size = static_cast<uint>( len );
     memcpy(
-        ptr + m_metadata_offset + (sizeof( VkSha256Metadata ) * m_count),
+        reinterpret_cast<uint8_t*>( m_metadata.pData ) + (sizeof( VkSha256Metadata ) * m_count),
         &back,
         sizeof( VkSha256Metadata )
     );
 
     // Append the string
     memcpy(
-        ptr + (back.start * sizeof( uint )),
+        reinterpret_cast<uint8_t*>( m_data.pData ) + (back.start * sizeof( uint )),
         str,
         sizeof( char ) * len
     );
@@ -155,24 +101,16 @@ void Batch::Pop(void) {
 Batch::VkBufferDescriptors Batch::BufferDescriptors(void) const {
 
     // Get the last metadata element, if any
-    VkSha256Metadata back = { 0 };
-    if (m_count > 0){
-        // Copy onto the stack
-        ::std::memcpy(
-            &back,
-            static_cast<unsigned char*>( m_pData ) + m_metadata_offset + ((m_count - 1) * sizeof( VkSha256Metadata )),
-            sizeof( VkSha256Metadata )
-        );
-    }
+    const auto back = this->Back( );
 
     // Generate
     VkDescriptorBufferInfo vkDescriptorBufferInputs = {};
-    vkDescriptorBufferInputs.buffer = m_vkBuffer;
-    vkDescriptorBufferInputs.offset = 0;
+    vkDescriptorBufferInputs.buffer = m_data.vkBuffer;
+    vkDescriptorBufferInputs.offset = 0U;
     vkDescriptorBufferInputs.range = ((back.start + WordCount( back.size )) * sizeof( uint32_t ));
     VkDescriptorBufferInfo vkDescriptorBufferMetadata = {};
-    vkDescriptorBufferMetadata.buffer = m_vkBuffer;
-    vkDescriptorBufferMetadata.offset = static_cast<VkDeviceSize>( m_metadata_offset );
+    vkDescriptorBufferMetadata.buffer = m_metadata.vkBuffer;
+    vkDescriptorBufferMetadata.offset = 0U;
     vkDescriptorBufferMetadata.range = (sizeof( VkSha256Metadata ) * m_count);
 
     // Wrap up and return
@@ -185,63 +123,110 @@ Batch::VkBufferDescriptors Batch::BufferDescriptors(void) const {
 
 Batch Batch::New(ComputeDevice& device, VkDeviceSize vkSize) {
 
-    // Start with an empty batch
-    Batch batch;
+    const auto allocateBuffer = [&]() -> Buffer {
+        // Start with an empty buffer
+        Buffer buffer;
 
-    // Get the (approx) memory requirements and look fro some corresponding memory types
-    const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSize );
-    const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
-        vkMemoryRequirements,
-        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    );
+        // Get the (approx) memory requirements and look fro some corresponding memory types
+        const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSize );
+        const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+            vkMemoryRequirements,
+            (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+        );
 
-    // Iterate, trying to allocate
-    for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
-        const auto& deviceMemoryBudget = *it;
-        if (deviceMemoryBudget.vkMemoryBudget < vkSize){
-            // We're not interested, yet..?
-            continue;
-        }
-
-        // Try and allocate
-        auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkSize );
-        if (vkDeviceMemory == VK_NULL_HANDLE){
-            continue;
-        }
-
-        // Wrap it up
-        batch = Batch( device, vkDeviceMemory, vkSize );
-        break;
-    }
-    if (!batch){
-        // Iterate again, but this time accept a potentially smaller size
+        // Iterate, trying to allocate
         for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
             const auto& deviceMemoryBudget = *it;
+            if (deviceMemoryBudget.vkMemoryBudget < vkSize){
+                // We're not interested, yet..?
+                continue;
+            }
 
             // Try and allocate
-            const auto allocationSize = ::std::min( deviceMemoryBudget.vkMemoryBudget, vkSize );
-            auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, allocationSize );
+            auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkSize );
             if (vkDeviceMemory == VK_NULL_HANDLE){
                 continue;
             }
 
             // Wrap it up
-            batch = Batch( device, vkDeviceMemory, allocationSize );
+            buffer = Buffer( *device, vkDeviceMemory, vkSize );
             break;
         }
-    }
-    return batch;
+        if (!buffer){
+            // Iterate again, but this time accept a potentially smaller size
+            for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
+                const auto& deviceMemoryBudget = *it;
+
+                // Try and allocate
+                const auto allocationSize = ::std::min( deviceMemoryBudget.vkMemoryBudget, vkSize );
+                auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, allocationSize );
+                if (vkDeviceMemory == VK_NULL_HANDLE){
+                    continue;
+                }
+
+                // Wrap it up
+                buffer = Buffer( *device, vkDeviceMemory, allocationSize );
+                break;
+            }
+        }
+        return buffer;
+    };
+    auto data = allocateBuffer( );
+    auto metadata = allocateBuffer( );
+    return Batch( ::std::move( data ), ::std::move( metadata ) );
 }
 
-Batch::Batch(const ComputeDevice& device, VkDeviceMemory vkDeviceMemory, VkDeviceSize vkSize):
-    m_vkDevice( *device ),
-    m_vkBuffer( VK_NULL_HANDLE ),
-    m_vkDeviceMemory( vkDeviceMemory ),
-    m_vkSize( vkSize ),
-    m_minStorageBufferOffsetAlignment( device.MinStorageBufferOffset( ) ),
-    m_pData( nullptr ),
-    m_count( 0U ),
-    m_metadata_offset( 0U ) {
+Batch::Batch(Buffer&& data, Buffer&& metadata):
+    m_data( ::std::move( data ) ),
+    m_metadata( ::std::move( metadata ) ),
+    m_count( 0U ) {
+}
+
+void Batch::Reset(void) {
+    m_count = 0U;
+}
+
+void Batch::Release(void) {
+    m_data = Buffer( );
+    m_metadata = Buffer( );
+    Reset( );
+}
+
+VkSha256Metadata Batch::Back(void) const {
+
+    VkSha256Metadata back = { 0 };
+    if (m_count > 0){
+        // Copy onto the stack
+        ::std::memcpy(
+            &back,
+            static_cast<unsigned char*>( m_metadata.pData ) + ((m_count - 1) * sizeof( VkSha256Metadata )),
+            sizeof( VkSha256Metadata )
+        );
+    }
+    return back;
+}
+
+uint32_t Batch::WordCount(size_t len) {
+    const size_t words = len / sizeof( uint32_t );
+    return ((len % sizeof( uint32_t )) == 0)
+        ? words
+        : (words + 1);
+}
+
+Batch::Buffer::Buffer(Buffer&& buffer) noexcept:
+    vkDevice( buffer.vkDevice ),
+    vkBuffer( buffer.vkBuffer ),
+    vkDeviceMemory( buffer.vkDeviceMemory ),
+    pData( buffer.pData ),
+    vkSize( buffer.vkSize) {
+
+    buffer.Reset( );        
+}
+
+Batch::Buffer::Buffer(VkDevice p_vkDevice, VkDeviceMemory p_vkDeviceMemory, VkDeviceSize p_vkSize) noexcept:
+    vkDevice( p_vkDevice ),
+    vkDeviceMemory( p_vkDeviceMemory ),
+    vkSize( p_vkSize ) {
 
     // Create a buffer
     VkBufferCreateInfo vkBufferCreateInfo = {};
@@ -250,10 +235,10 @@ Batch::Batch(const ComputeDevice& device, VkDeviceMemory vkDeviceMemory, VkDevic
     vkBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     vkBufferCreateInfo.size = vkSize;
     VkResult vkResult = ::vkCreateBuffer(
-        m_vkDevice,
+        vkDevice,
         &vkBufferCreateInfo,
         VK_NULL_HANDLE,
-        &m_vkBuffer
+        &vkBuffer
     );
     if (vkResult != VK_SUCCESS){
         Release( );
@@ -261,86 +246,60 @@ Batch::Batch(const ComputeDevice& device, VkDeviceMemory vkDeviceMemory, VkDevic
     }
 
     // Bind the buffer to the device memory
-    vkResult = ::vkBindBufferMemory( m_vkDevice, m_vkBuffer, m_vkDeviceMemory, 0U );
+    vkResult = ::vkBindBufferMemory( vkDevice, vkBuffer, vkDeviceMemory, 0U );
     if (vkResult != VK_SUCCESS){
         Release( );
         return;
     }
     
     // Map in the memory
-    vkResult = ::vkMapMemory( m_vkDevice, vkDeviceMemory, 0U, VK_WHOLE_SIZE, 0, &m_pData );
+    vkResult = ::vkMapMemory( vkDevice, vkDeviceMemory, 0U, VK_WHOLE_SIZE, 0, &pData );
     if (vkResult != VK_SUCCESS){
         Release( );
         return;
     }
-    Reuse( );
+
+    // Apparently important on Steam Deck..?
+    ::std::memset( pData, 0, vkSize ); 
 }
 
-void Batch::Reset(void) {
+Batch::Buffer& Batch::Buffer::operator=(Buffer&& buffer) noexcept {
 
-    m_vkDevice = VK_NULL_HANDLE;
-    m_vkDeviceMemory = VK_NULL_HANDLE;
-    m_vkSize = m_minStorageBufferOffsetAlignment = 0U;
-    m_vkBuffer = VK_NULL_HANDLE;
-    m_pData = nullptr;
-    m_count = 0U;
-    m_metadata_offset = 0U;
+    if (this != &buffer){
+        Release( );
+
+        vkDevice = buffer.vkDevice;
+        vkBuffer = buffer.vkBuffer;
+        vkDeviceMemory = buffer.vkDeviceMemory;
+        vkSize = buffer.vkSize;
+        pData = buffer.pData;
+
+        buffer.Reset( );
+    }
+    return (*this);
 }
 
-void Batch::Release(void) {
+void Batch::Buffer::Reset(void) {
 
-    const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
-    if (m_vkBuffer != VK_NULL_HANDLE){
-        ::vkDestroyBuffer( m_vkDevice, m_vkBuffer, pAllocator );
+    vkDevice = VK_NULL_HANDLE;
+    vkBuffer = VK_NULL_HANDLE;
+    vkDeviceMemory = VK_NULL_HANDLE;
+    vkSize = 0U;
+    pData = nullptr;
+}
+
+void Batch::Buffer::Release(void) {
+
+    if (vkBuffer != VK_NULL_HANDLE){
+        ::vkDestroyBuffer( vkDevice, vkBuffer, c_pAllocator );
     }
-    if (m_pData){
-        ::vkUnmapMemory( m_vkDevice, m_vkDeviceMemory );
+    if (pData){
+        ::vkUnmapMemory( vkDevice, vkDeviceMemory );
     }
-    if (m_vkDeviceMemory != VK_NULL_HANDLE){
-        ::vkFreeMemory( m_vkDevice, m_vkDeviceMemory, pAllocator );
+    if (vkDeviceMemory != VK_NULL_HANDLE){
+        ::vkFreeMemory( vkDevice, vkDeviceMemory, c_pAllocator );
     }
     Reset( );
-}
-
-size_t Batch::AlignOffset(size_t offset, size_t size) {
-
-    const auto lcm = [](size_t s1, size_t s2) -> size_t {
-        // Figure out the smaller of the two inputs
-        auto lhs = s1, rhs = s2;
-        if (s1 > s2){
-            lhs = s2;
-            rhs = s1;
-        }
-
-        // Loop until we find some multiple of the larger value that is
-        // disivible by the smaller value with no remainder
-        decltype(rhs) lcm = 0;
-        for (decltype(lhs) multiplier = 1; true; ++multiplier) {
-            const auto tmp = (rhs * multiplier);
-            if ((tmp % lhs) == 0){
-                lcm = tmp;
-                break;
-            }
-        }
-        return lcm;
-    };
-
-    // The target alignment is the lowest common multiple of the minimum offset
-    // (provided to us by our Creator) and the required alignment of the given
-    // type
-    const auto alignment = lcm( m_minStorageBufferOffsetAlignment, size );
-    const auto delta = (offset % alignment);
-    if (delta == 0){
-        return offset;
-    }
-    return offset + (alignment - delta);
-}
-
-uint32_t Batch::WordCount(size_t len) {
-    const size_t words = len / sizeof( uint32_t );
-    return ((len % sizeof( uint32_t )) == 0)
-        ? words
-        : (words + 1);
 }
 
 } // namespace vkmr

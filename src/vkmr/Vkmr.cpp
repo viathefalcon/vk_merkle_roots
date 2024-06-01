@@ -62,9 +62,16 @@ int main(int argc, const char* argv[]) {
 
 #if defined (VULKAN_SUPPORT)
         // Copy into each of the Vulkan-based instances
+        bool ok = true;
         instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
-            instance.Add( arg );
+            if (ok){
+                ok = instance.Add( arg );
+            }
         } );
+        if (!ok){
+            std::cerr << "Failed to add \"" << arg << "\"" << std::endl;
+            break;
+        }
 #endif
 
         /*
