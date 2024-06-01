@@ -292,10 +292,20 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
-    if (m_slice.Reserve( )){
-        return m_batch.Push( arg.c_str( ), arg.size( ) );
+    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+        if (m_slice.Reserve( )){
+            return true;
+        }
+        m_batch.Pop( );
     }
     return false;
+}
+
+void VkSha256D::Instance::Cap(size_t size) {
+
+    if (m_slice.Reserved( ) > size){
+        m_slice.Unreserve( m_slice.Reserved( ) - size );
+    }
 }
 
 } // namespace vkmr

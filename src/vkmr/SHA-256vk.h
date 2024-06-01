@@ -71,6 +71,7 @@ public:
     out_type Root(void);
 
     bool Add(const arg_type&);
+    void Cap(size_t);
 
 private:
     typedef Slice<VkSha256Result> slice_type;

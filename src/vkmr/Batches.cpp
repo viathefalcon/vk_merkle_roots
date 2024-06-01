@@ -171,9 +171,7 @@ Batch Batch::New(ComputeDevice& device, VkDeviceSize vkSize) {
         }
         return buffer;
     };
-    auto data = allocateBuffer( );
-    auto metadata = allocateBuffer( );
-    return Batch( ::std::move( data ), ::std::move( metadata ) );
+    return Batch( allocateBuffer( ), allocateBuffer( ) );
 }
 
 Batch::Batch(Buffer&& data, Buffer&& metadata):
