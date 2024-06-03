@@ -26,6 +26,16 @@ extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
+// Types
+//
+
+struct alignas(uint) BySubgroupPushConstants {
+    uint offset;
+    uint pairs;
+    uint delta;
+    uint bound;
+};
+
 // Classes
 //
 class Reduction {
@@ -507,7 +517,7 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
 
     // Get the (approx) memory requirements
     m_count = slice.Reserved( );
-    const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) * m_count );
+    const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) );
     m_vkSize = vkMemoryRequirements.size;
 
     // Look for some corresponding memory types, and try to allocate
@@ -571,6 +581,9 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
         vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         m_vkResult = ::vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
         if (m_vkResult == VK_SUCCESS){
+            VkPhysicalDeviceProperties vkPhysicalDeviceProperties = {};
+            ::vkGetPhysicalDeviceProperties( device.PhysicalDevice( ), &vkPhysicalDeviceProperties );
+
             ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
             VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
             ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
@@ -578,25 +591,36 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
             // Loop until we will have reduced the number of elements to 1
             for (uint delta = 1U, count = m_count; count > 1U; ){
                 const auto pairs = (((count % 2 == 0) ? count : (count+1)) >> 1);
-
-                // Push the constants
-                struct {
-                    uint pairs, delta, bound;
-                } pc;
-                pc.pairs = pairs;
-                pc.delta = delta;
-                pc.bound = m_count;
-                ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
-
-                // Actually dispatch the shader invocations
                 const auto& workgroupSize = pipeline.GetWorkGroupSize( );
                 count = workgroupSize.GetGroupCountX( pairs );
-                ::std::cout << "Dispatching " << count << " subgroup-ed workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
-                ::vkCmdDispatch( vkCommandBuffer, count, 1, 1 );
+
+                // Split into as many dispatches as are needed
+                for (auto remaining = count; remaining > 0U; ){
+                    const auto x = ::std::min(
+                        remaining,
+                        vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0]
+                    );
+
+                    // Push the constants
+                    BySubgroupPushConstants pc = { 0U };
+                    pc.offset = workgroupSize.x * (count - remaining);
+                    pc.pairs = pairs;
+                    pc.delta = delta;
+                    pc.bound = m_count;
+                    ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
+
+                    // Actually dispatch the shader invocations
+                    ::std::cout << "Dispatching " << x << " subgroup-ed workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
+                    ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
+
+                    // Advance
+                    remaining -= x;
+                }
 
                 // Tee up the next iteration
+                delta *= (workgroupSize.x << 1); // x2 because each invocation in the group has addressed two items
                 if (count > 1U){
-                    // Inject a barrier between shader invocations
+                    // Inject a barrier between passes
                     VkMemoryBarrier2KHR vkMemoryBarrier = {};
                     vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                     vkMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
@@ -609,7 +633,6 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
                     vkDependencyInfo.pMemoryBarriers = &vkMemoryBarrier;
                     g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
                 }
-                delta *= (workgroupSize.x << 1); // x2 because each invocation in the group has addressed two items
             }
         }
         if (m_vkResult == VK_SUCCESS){
@@ -680,7 +703,7 @@ VkResult ReductionBySubgroup::Dispatch(VkFence vkFence, VkQueue vkQueue) {
         const auto pResults = static_cast<uint8_t*>( pMapped );
         ::std::memcpy( &m_vkSha256Result, pResults, sizeof( VkSha256Result ) );
 
-        // The output is big-endian in nature; convert to little endiannes prior to output
+        // The output is big-endian in nature; convert to little endianess prior to output
         for (auto u = 0U; u < SHA256_WC; ++u){
             const uint w = m_vkSha256Result.data[u];
             m_vkSha256Result.data[u] = SWOP_ENDS_U32( w );
@@ -866,7 +889,7 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
     WorkgroupSize workgroupSize = {};
     WorkgroupSize *pWorkgroupSize = nullptr;
     if (subgroupsSupported){
-        ::std::cout << "Subgroup feature flags = " << std::hex << subgroupFeatureFlags << ::std::endl;
+        ::std::cout << "Subgroup feature flags = 0x" << std::hex << subgroupFeatureFlags << ::std::endl;
         ::std::cout << "Subgroups, with relative shuffle support, of size " << std::dec << subgroupSize << " are supported." << ::std::endl;
 
         workgroupSize.x = vkmr::largest_pow2_le( subgroupSize );
@@ -905,7 +928,9 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         VkPushConstantRange vkPushConstantRange = {};
         vkPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         vkPushConstantRange.offset = 0;
-        vkPushConstantRange.size = (sizeof( uint ) * 3);
+        vkPushConstantRange.size = subgroupsSupported
+            ? sizeof( BySubgroupPushConstants )
+            : (sizeof( uint ) * 3);
         reductions.reset( new ReductionsImpl(
             device,
             vkmr::Pipeline(

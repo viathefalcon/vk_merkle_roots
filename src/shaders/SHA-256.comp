@@ -29,6 +29,7 @@
 layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 layout(push_constant, std430) uniform pc {
+    uint offset;
     uint bound;
 };
 
@@ -60,6 +61,7 @@ layout(constant_id = 2) const uint localSizeZ = 1;
 layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 layout(push_constant, std430) uniform pc {
+    uint offset;
     uint pairs;
     uint delta;
     uint bound;
@@ -180,7 +182,7 @@ void sha256_be_1(inout uvec4 arg1, inout uvec4 arg2) {
 void main() {
 
     // Bounds check
-    const uint gid = gl_GlobalInvocationID.x;
+    const uint gid = (offset + gl_GlobalInvocationID.x);
     if (gid > bound){
         return;
     }
@@ -329,7 +331,8 @@ void main() {
     // We clamp this to the bounds of the input data so every invocation
     // at or past this point will end up calculating the root of the
     // same sub-tree (but we only care about the first invocation)
-    uint w = gl_GlobalInvocationID.x * (delta << 1);
+    const uint globalInvocationID = (gl_GlobalInvocationID.x + offset);
+    uint w = globalInvocationID * (delta << 1);
     uint v = (bound - 1);
     const uint idx = (w < bound) ? w : v;
 
@@ -345,7 +348,7 @@ void main() {
 
     // Calc the number of invocations beyond the current (sub)group,
     // and use to calculate the maximum distance of a shuffle down op
-    v = (pairs - (gl_GlobalInvocationID.x - gl_LocalInvocationID.x));
+    v = (pairs - (globalInvocationID - gl_LocalInvocationID.x));
     uint maxShuffleDist = ((v < localSizeX) ? v : localSizeX);
     maxShuffleDist -= (gl_LocalInvocationID.x + 1);
 
@@ -383,6 +386,10 @@ void main() {
 
         // Halve the number of active invocations
         invocations = (((invocations % 2) == 0) ? invocations : (invocations + 1)) >> 1;
+    }
+    if (gl_LocalInvocationID.x > 0){
+        // We are only interested in the output from the first invocation in the group
+        return;
     }
 
     // Do the last hash op, and copy out the result

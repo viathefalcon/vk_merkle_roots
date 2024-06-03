@@ -53,6 +53,7 @@ int main(int argc, const char* argv[]) {
 
     // Loop over the inputs
     vkmr::Input input( stdin );
+    size_t size = 0U, count = 0U;
     while (input.Has( )){
         const auto arg = input.Get( );
         if (arg.empty( )){
@@ -62,26 +63,34 @@ int main(int argc, const char* argv[]) {
 
 #if defined (VULKAN_SUPPORT)
         // Copy into each of the Vulkan-based instances
+        bool ok = true;
         instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
-            instance.Add( arg );
+            if (ok){
+                ok = instance.Add( arg );
+            }
         } );
+        if (!ok){
+            std::cerr << "Stopping at \"" << arg << "\" (#" << count << ")" << std::endl;
+            instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
+                instance.Cap( count );
+            } );
+            break;
+        }
 #endif
-
-        /*
-        const auto hashed = vkmr::cpu_sha256d( arg );
-        cout << arg << " >> " << print_bytes( hashed ).str( ) << endl;
-        */
 
         if (!mrc.Add( std::move( arg ) )){
             std::cerr << "Failed to accumulate \"" << arg << "\"" << std::endl;
             break;
         }
+
+        size += arg.size( );
+        count++;
     }
-    if (input.Count( ) > 0U){
+    if (count > 0U){
         StopWatch sw;
         sw.Start( );
         const auto root = mrc.Root( );
-        cout << "Root (of " << input.Count( ) << " item(s), " << input.Size( ) << " byte(s)) => " << print_bytes( root ).str( ) << " in " << sw.Elapsed( ) << endl;
+        cout << "Root (of " << count << " item(s), " << size << " byte(s)) => " << print_bytes( root ).str( ) << " in " << sw.Elapsed( ) << endl;
 #if defined (VULKAN_SUPPORT)
         instances.ForEach( [&](vkmr::VkSha256D::Instance& instance) {
             cout << instance.Name( ) << ":" << endl;

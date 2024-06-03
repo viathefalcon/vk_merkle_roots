@@ -78,6 +78,10 @@ public:
         return false;
     }
 
+    void Unreserve(size_t count = 1U) {
+        m_reserved -= ::std::min( m_reserved, count );
+    }
+
     // Return the number of reservations in the slice
     size_t Reserved(void) const { return m_reserved; }
 

@@ -48,19 +48,10 @@ public:
 
     Batch& operator=(Batch&&);
     Batch& operator=(Batch const&) = delete;
-    operator bool() const { return (m_pData != nullptr); }
-
-    // Returns the underlying buffer
-    VkBuffer Buffer(void) const { return m_vkBuffer; } 
-
-    // Returns the size of the batch
-    VkDeviceSize Size(void) const { return m_vkSize; }
+    operator bool() const { return (static_cast<bool>( m_data ) && static_cast<bool>( m_metadata )); }
 
     // Returns the number of strings in the batch
     size_t Count(void) const { return m_count; }
-
-    // Prepares the batch for reuse
-    void Reuse(void);
 
     // Pushes the given string onto the batch
     bool Push(const char*, size_t);
@@ -75,27 +66,42 @@ public:
     static Batch New(ComputeDevice&, VkDeviceSize);
 
 private:
-    Batch(const ComputeDevice&, VkDeviceMemory, VkDeviceSize);
+    struct Buffer {
+        VkDevice vkDevice;
+        VkBuffer vkBuffer;
+        VkDeviceMemory vkDeviceMemory;
+        VkDeviceSize vkSize;
+        void* pData;
+
+        Buffer(Buffer const&) = delete;
+        Buffer(Buffer&&) noexcept;
+        Buffer(VkDevice, VkDeviceMemory, VkDeviceSize) noexcept;
+        Buffer() noexcept { Reset( ); }
+        ~Buffer() noexcept { Release( ); }
+
+        operator bool() const { return (pData != nullptr); }
+        Buffer& operator=(Buffer const&) = delete;
+        Buffer& operator=(Buffer&&) noexcept;
+
+        void Reset(void);
+        void Release(void);
+    };
+
+    Batch(Buffer&&, Buffer&&);
 
     void Reset(void);
     void Release(void);
 
-    // Adjusts the given offset to be aligned to the lowest common multiple
-    // of the minimum such offset for the underlying device and a given type
-    size_t AlignOffset(size_t, size_t);
+    // Returns the metadata of the last string in the batch
+    VkSha256Metadata Back() const;
 
     // Counts the number of 32-bit words
     // needed to hold a string of the given (byte)
     // length
     static uint32_t WordCount(size_t);
 
-    VkDevice m_vkDevice;
-    VkBuffer m_vkBuffer;
-    VkDeviceMemory m_vkDeviceMemory;
-    VkDeviceSize m_vkSize, m_minStorageBufferOffsetAlignment;
-
-    void* m_pData;
-    size_t m_count, m_metadata_offset;
+    Buffer m_data, m_metadata;
+    size_t m_count;
 };
 
 } // namespace vkmr

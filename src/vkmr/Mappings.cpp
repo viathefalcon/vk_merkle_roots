@@ -25,12 +25,20 @@ extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
+// Types
+//
+
+struct alignas(uint) MappingPushConstants {
+    uint offset;
+    uint bound;
+};
+
 // Classes
 //
 class Mapping {
 public:
     Mapping(Mapping&&);
-    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&);
+    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, uint32_t);
     Mapping(Mapping const&) = delete;
 
     Mapping(void) { Reset( ); }
@@ -55,6 +63,8 @@ private:
 
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
+
+    uint32_t m_maxComputeWorkGroupCount;
 };
 
 Mapping::Mapping(Mapping&& mapping):
@@ -62,17 +72,19 @@ Mapping::Mapping(Mapping&& mapping):
     m_vkDevice( mapping.m_vkDevice ),
     m_vkFence( mapping.m_vkFence ),
     m_descriptorSet( ::std::move( mapping.m_descriptorSet ) ),
-    m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ) {
+    m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ),
+    m_maxComputeWorkGroupCount( mapping.m_maxComputeWorkGroupCount ) {
     
     mapping.Reset( );
 }
 
-Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer):
+Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, uint32_t maxComputeWorkGroupCount):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
     m_descriptorSet( ::std::move( descriptorSet ) ),
-    m_commandBuffer( ::std::move( commandBuffer ) ) {
+    m_commandBuffer( ::std::move( commandBuffer ) ),
+    m_maxComputeWorkGroupCount( maxComputeWorkGroupCount ) {
 
     // Create the fence
     VkFenceCreateInfo vkFenceCreateInfo = {};
@@ -90,6 +102,7 @@ Mapping& Mapping::operator=(Mapping&& mapping) {
         m_vkFence = mapping.m_vkFence;
         m_descriptorSet = ::std::move( mapping.m_descriptorSet );
         m_commandBuffer = ::std::move( mapping.m_commandBuffer );
+        m_maxComputeWorkGroupCount = mapping.m_maxComputeWorkGroupCount;
 
         mapping.Reset( );
     }
@@ -153,15 +166,28 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
         host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
         g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
-        // Set the bound
+        // Split into as many dispatches as are needed
         const auto bound = static_cast<uint>( batch.Count( ) );
-        ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( bound ), &bound );
+        const auto& workgroupSize = pipeline.GetWorkGroupSize( );
+        const auto count = workgroupSize.GetGroupCountX( bound );
+        for (auto remaining = count; remaining > 0U; ){
+            const auto x = ::std::min(
+                remaining,
+                m_maxComputeWorkGroupCount
+            );
 
-        // Figure out the number of workgroups
-        const auto x = pipeline.GetWorkGroupSize( ).GetGroupCountX( bound );
+            // Push the constants
+            MappingPushConstants pc = { 0U };
+            pc.offset = workgroupSize.x * (count - remaining);
+            pc.bound = batch.Count( );
+            ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
 
-        // Actually dispatch the shader invocations
-        ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
+            // Actually dispatch the shader invocations
+            ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
+
+            // Advance
+            remaining -= x;
+        }
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }
     return (*this);
@@ -193,6 +219,7 @@ void Mapping::Reset(void) {
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
     m_vkFence = VK_NULL_HANDLE;
+    m_maxComputeWorkGroupCount = 0U;
 }
 
 void Mapping::Release(void) {
@@ -211,7 +238,12 @@ public:
         m_vkDevice( *device ),
         m_descriptorPool( device.CreateDescriptorPool( 1, 3 ) ),
         m_commandPool( device.CreateCommandPool( ) ),
-        m_pipeline( ::std::move( pipeline ) ) { }
+        m_pipeline( ::std::move( pipeline ) ) {
+
+        VkPhysicalDeviceProperties vkPhysicalDeviceProperties = {};
+        ::vkGetPhysicalDeviceProperties( device.PhysicalDevice( ), &vkPhysicalDeviceProperties );
+        m_maxComputeWorkGroupCount = vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
+    }
 
     virtual ~MappingsImpl(void) {
 
@@ -225,6 +257,7 @@ public:
 
 private:
     VkDevice m_vkDevice;
+    uint32_t m_maxComputeWorkGroupCount;
 
     DescriptorPool m_descriptorPool;
     CommandPool m_commandPool;
@@ -244,7 +277,8 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
             Mapping(
                 m_vkDevice,
                 m_descriptorPool.AllocateDescriptorSet( m_pipeline ),
-                m_commandPool.AllocateCommandBuffer( )
+                m_commandPool.AllocateCommandBuffer( ),
+                m_maxComputeWorkGroupCount
             )
         );
     }
@@ -331,7 +365,7 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
         VkPushConstantRange vkPushConstantRange = {};
         vkPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         vkPushConstantRange.offset = 0;
-        vkPushConstantRange.size = sizeof( uint );
+        vkPushConstantRange.size = sizeof( MappingPushConstants );
         mappings.reset( new MappingsImpl(
             device,
             vkmr::Pipeline(
