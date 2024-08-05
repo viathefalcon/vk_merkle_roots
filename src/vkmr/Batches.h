@@ -20,6 +20,7 @@
 
 // C++ Standard Library Headers
 #include <memory>
+#include <vector>
 
 // Local Project Headers
 #include "Devices.h"
@@ -27,11 +28,18 @@
 
 namespace vkmr {
 
+// Forward Declarations
+//
+
+class Batches;
+
 // Class(es)
 //
 
 // Encapsulates a batch of inputs
 class Batch {
+    friend class Batches;
+
 public:
     typedef struct {
 
@@ -39,6 +47,8 @@ public:
         VkDescriptorBufferInfo vkDescriptorBufferMetdata;
 
     } VkBufferDescriptors;
+
+    typedef uint32_t number_type;
 
     Batch(Batch&&);
     Batch(Batch const&) = delete;
@@ -62,8 +72,32 @@ public:
     // Returns the buffer descriptors
     VkBufferDescriptors BufferDescriptors(void) const;
 
-    // Allocates and returns a new batch
-    static Batch New(ComputeDevice&, VkDeviceSize);
+    // Locks the batch for further writing
+    Batch& Lock(void) {
+        m_locked = true;
+        return (*this);
+    }
+
+    // Unlocks the batch for further writing
+    Batch& Unlock(void) {
+        m_locked = false;
+        return (*this);
+    }
+
+    // Returns true if the batch is locked; false otherwise
+    inline bool IsLocked(void) const {
+        return m_locked;
+    }
+
+    // Enables the batch for re-use
+    Batch& Reuse(void) {
+        Unlock( );
+        m_count = 0U;
+        return (*this);
+    }
+
+    // Returns the batch number
+    number_type Number(void) const { return m_number; }
 
 private:
     struct Buffer {
@@ -87,7 +121,7 @@ private:
         void Release(void);
     };
 
-    Batch(Buffer&&, Buffer&&);
+    Batch(number_type, Buffer&&, Buffer&&);
 
     void Reset(void);
     void Release(void);
@@ -100,8 +134,51 @@ private:
     // length
     static uint32_t WordCount(size_t);
 
+    // Buffers to hold the batch data and metadata, respectively
     Buffer m_data, m_metadata;
+
+    // Gives the number of inputs in the batch
     size_t m_count;
+
+    // Indicates whether the batch is locked for further writing
+    bool m_locked;
+
+    // Gives the batch number
+    number_type m_number;
+};
+
+// Encapsulates a collection of batches
+class Batches {
+public:
+    Batches(Batches&&) noexcept;
+    Batches(Batches&) = delete;
+    Batches(VkDeviceSize vkDataSize, VkDeviceSize vkMetadataSize):
+        m_vkDataSize( vkDataSize ),
+        m_vkMetadataSize( vkMetadataSize ),
+        m_last( -1 ) { }
+
+    Batch& operator[](int);
+    Batches& operator=(Batches&&) noexcept;
+    Batches& operator=(Batches const&) = delete;
+    operator bool() const {
+        return (m_vkDataSize > 0U) && (m_vkMetadataSize > 0U);
+    }
+
+    // Returns a reference to a batch available for writing
+    Batch& Get(ComputeDevice&);
+
+    // Returns a reference to the most-recently-got batch
+    Batch& Last(void);
+
+    // Resets to an invalid state
+    Batches& Reset(void);
+
+private:
+    VkDeviceSize m_vkDataSize, m_vkMetadataSize;
+
+    int m_last;
+    ::std::vector<Batch> m_batches;
+    Batch m_empty;
 };
 
 } // namespace vkmr

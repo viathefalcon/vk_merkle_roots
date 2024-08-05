@@ -6,6 +6,7 @@
 
 // C++ Standard Library Headers
 #include <cstring>
+#include <algorithm>
 
 // Local Project Headers
 #include "Debug.h"
@@ -24,7 +25,9 @@ namespace vkmr {
 Batch::Batch(Batch&& batch):
     m_data( ::std::move( batch.m_data ) ),
     m_metadata( ::std::move( batch.m_metadata ) ),
-    m_count( batch.m_count ) {
+    m_count( batch.m_count ),
+    m_locked( batch.m_locked ),
+    m_number( batch.m_number ) {
 
     batch.Reset( );
 }
@@ -37,6 +40,8 @@ Batch& Batch::operator=(Batch&& batch) {
         m_data = ::std::move( batch.m_data );
         m_metadata = ::std::move( batch.m_metadata );
         m_count = batch.m_count;
+        m_locked = batch.m_locked;
+        m_number = batch.m_number;
 
         batch.Reset( );
     }
@@ -47,6 +52,9 @@ bool Batch::Push(const char* str, size_t len) {
 
     // Look for an early out
     if (!(*this)){
+        return false;
+    }
+    if (this->IsLocked( )){
         return false;
     }
     if (!str || (len == 0)){
@@ -93,6 +101,9 @@ bool Batch::Push(const char* str, size_t len) {
 
 void Batch::Pop(void) {
 
+    if (this->IsLocked( )){
+        return;
+    }
     if (m_count > 0){
         m_count -= 1U;
     }
@@ -121,67 +132,18 @@ Batch::VkBufferDescriptors Batch::BufferDescriptors(void) const {
     return vkBufferDescriptors;
 }
 
-Batch Batch::New(ComputeDevice& device, VkDeviceSize vkSize) {
-
-    const auto allocateBuffer = [&]() -> Buffer {
-        // Start with an empty buffer
-        Buffer buffer;
-
-        // Get the (approx) memory requirements and look fro some corresponding memory types
-        const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSize );
-        const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
-            vkMemoryRequirements,
-            (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-        );
-
-        // Iterate, trying to allocate
-        for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
-            const auto& deviceMemoryBudget = *it;
-            if (deviceMemoryBudget.vkMemoryBudget < vkSize){
-                // We're not interested, yet..?
-                continue;
-            }
-
-            // Try and allocate
-            auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkSize );
-            if (vkDeviceMemory == VK_NULL_HANDLE){
-                continue;
-            }
-
-            // Wrap it up
-            buffer = Buffer( *device, vkDeviceMemory, vkSize );
-            break;
-        }
-        if (!buffer){
-            // Iterate again, but this time accept a potentially smaller size
-            for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
-                const auto& deviceMemoryBudget = *it;
-
-                // Try and allocate
-                const auto allocationSize = ::std::min( deviceMemoryBudget.vkMemoryBudget, vkSize );
-                auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, allocationSize );
-                if (vkDeviceMemory == VK_NULL_HANDLE){
-                    continue;
-                }
-
-                // Wrap it up
-                buffer = Buffer( *device, vkDeviceMemory, allocationSize );
-                break;
-            }
-        }
-        return buffer;
-    };
-    return Batch( allocateBuffer( ), allocateBuffer( ) );
-}
-
-Batch::Batch(Buffer&& data, Buffer&& metadata):
+Batch::Batch(Batch::number_type number, Buffer&& data, Buffer&& metadata):
     m_data( ::std::move( data ) ),
     m_metadata( ::std::move( metadata ) ),
-    m_count( 0U ) {
+    m_count( 0U ),
+    m_locked( false ),
+    m_number( number ) {
 }
 
 void Batch::Reset(void) {
     m_count = 0U;
+    m_locked = false;
+    m_number = 0xFFFFFFFF;
 }
 
 void Batch::Release(void) {
@@ -298,6 +260,126 @@ void Batch::Buffer::Release(void) {
         ::vkFreeMemory( vkDevice, vkDeviceMemory, c_pAllocator );
     }
     Reset( );
+}
+
+Batches::Batches(Batches&& batches) noexcept:
+    m_vkDataSize( batches.m_vkDataSize ),
+    m_vkMetadataSize( batches.m_vkMetadataSize ),
+    m_last( batches.m_last ),
+    m_batches( ::std::move( batches.m_batches ) ),
+    m_empty( ::std::move( batches.m_empty ) ) {    
+}
+
+Batches& Batches::operator=(Batches&& batches) noexcept {
+
+    if (this != &batches){
+        m_vkDataSize = batches.m_vkDataSize;
+        m_vkMetadataSize = batches.m_vkMetadataSize;
+        m_last = batches.m_last;
+        m_batches = ::std::move( batches.m_batches );
+        m_empty = ::std::move( batches.m_empty );
+    }
+    return (*this);
+}
+
+Batch& Batches::operator[](int index) {
+    return m_batches[index];
+}
+
+Batch& Batches::Get(ComputeDevice& device) {
+
+    // Look for an early out
+    if (!(*this)){
+        return m_empty;
+    }
+
+    // Scan for an unlocked batch 
+    const auto found = ::std::find_if_not(
+        m_batches.begin( ),
+        m_batches.end( ),
+        [](Batch& batch) {
+            return batch.IsLocked( );
+        }
+    );
+    if (found == m_batches.end( )){
+        // n/a, so we need to instantiate a new one, if we can
+        const auto allocateBuffer = [&](VkDeviceSize vkSize) -> Batch::Buffer {
+            // Start with an empty buffer
+            Batch::Buffer buffer;
+
+            // Get the (approx) memory requirements and look fro some corresponding memory types
+            const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSize );
+            const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+                vkMemoryRequirements,
+                (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            );
+
+            // Iterate, trying to allocate
+            for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
+                const auto& deviceMemoryBudget = *it;
+                if (deviceMemoryBudget.vkMemoryBudget < vkSize){
+                    // We're not interested, yet..?
+                    continue;
+                }
+
+                // Try and allocate
+                auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkSize );
+                if (vkDeviceMemory == VK_NULL_HANDLE){
+                    continue;
+                }
+
+                // Wrap it up
+                buffer = Batch::Buffer( *device, vkDeviceMemory, vkSize );
+                break;
+            }
+            if (!buffer){
+                // Iterate again, but this time accept a potentially smaller size
+                for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
+                    const auto& deviceMemoryBudget = *it;
+
+                    // Try and allocate
+                    const auto allocationSize = ::std::min( deviceMemoryBudget.vkMemoryBudget, vkSize );
+                    auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, allocationSize );
+                    if (vkDeviceMemory == VK_NULL_HANDLE){
+                        continue;
+                    }
+
+                    // Wrap it up
+                    buffer = Batch::Buffer( *device, vkDeviceMemory, allocationSize );
+                    break;
+                }
+            }
+            return buffer;
+        };
+        Batch batch(
+            m_batches.size( ), 
+            allocateBuffer( m_vkDataSize ),
+            allocateBuffer( m_vkMetadataSize )
+        );
+        if (batch){
+            m_last = batch.Number( );
+            m_batches.push_back( ::std::move( batch ) );
+            return m_batches.back( );
+        }
+        return m_empty;
+    }
+    return (*found);
+}
+
+Batch& Batches::Last(void) {
+
+    if (m_last < 0 || m_last >= m_batches.size( )){
+        return m_empty;
+    }
+    return m_batches.at( m_last );
+}
+
+Batches& Batches::Reset(void) {
+
+    m_batches.clear( );
+    m_last = -1;
+    m_vkDataSize = m_vkMetadataSize = 0U;
+    return (*this);
 }
 
 } // namespace vkmr

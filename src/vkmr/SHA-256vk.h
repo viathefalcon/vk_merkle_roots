@@ -77,8 +77,8 @@ private:
     typedef Slice<VkSha256Result> slice_type;
 
     ComputeDevice m_device;
-    Batch m_batch;
     slice_type m_slice;
+    Batches m_batches;
     ::std::unique_ptr<Mappings> m_mappings;
     ::std::unique_ptr<Reductions> m_reductions;
 };

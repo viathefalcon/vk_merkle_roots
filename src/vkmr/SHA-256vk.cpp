@@ -27,6 +27,11 @@
 #include "SHA-256vk.h"
 
 #if defined (VULKAN_SUPPORT)
+// Constants
+//
+
+static const VkDeviceSize Mega256 = (256 * 1024 * 1024);
+
 // Globals
 //
 
@@ -230,10 +235,9 @@ void VkSha256D::ForEach(::std::function<void(Instance&)> lambda) {
 
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
-    m_device( ::std::move( device ) ) {
+    m_device( ::std::move( device ) ),
+    m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
-    const VkDeviceSize Mega256 = (256 * 1024 * 1024);
-    m_batch = Batch::New( m_device, Mega256 );
     m_slice = slice_type::New( m_device, Mega256 );
     m_mappings = Mappings::New( m_device );
     m_reductions = Reductions::New( m_device );
@@ -242,16 +246,16 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( ::std::move( instance.m_device ) ),
-    m_batch( ::std::move( instance.m_batch ) ),
     m_slice( ::std::move( instance.m_slice ) ),
+    m_batches( ::std::move( instance.m_batches ) ),
     m_mappings( ::std::move( instance.m_mappings ) ),
     m_reductions( ::std::move( instance.m_reductions ) ) {
 }
 
 VkSha256D::Instance::~Instance() {
 
-    m_batch = Batch( );
     m_slice = slice_type( );
+    m_batches.Reset( );
     m_mappings.reset( );
     m_reductions.reset( );
 }
@@ -260,8 +264,8 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
     m_name = instance.Name( );
     m_device = ::std::move( instance.m_device );
-    m_batch = ::std::move( instance.m_batch );
     m_slice = ::std::move( instance.m_slice );
+    m_batches = ::std::move( instance.m_batches );
     m_mappings = ::std::move( instance.m_mappings );
     m_reductions = ::std::move( instance.m_reductions );
     return (*this);
@@ -280,7 +284,8 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     }
 
     // Map the inputs into the slice
-    auto mapping = m_mappings->Map( m_batch, m_slice, vkQueue );
+    auto& batch = m_batches.Last( );
+    auto mapping = m_mappings->Map( batch, m_slice, vkQueue );
     if (mapping == VK_NULL_HANDLE){
         return "<mapping>";
     }
@@ -292,13 +297,20 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
-    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
-        if (m_slice.Reserve( )){
-            return true;
+    auto& slice = m_slice;
+    auto push = [&slice, &arg](Batch& batch) -> bool {
+        if (batch.Push( arg.c_str( ), arg.size( ) )){
+            if (slice.Reserve( )){
+                return true;
+            }
+            batch.Pop( );
         }
-        m_batch.Pop( );
+        return false;
+    };
+    if (!push( m_batches.Last( ) )){
+        return (push( m_batches.Get( m_device ) ));
     }
-    return false;
+    return true;
 }
 
 void VkSha256D::Instance::Cap(size_t size) {
