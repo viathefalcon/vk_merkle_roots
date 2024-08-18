@@ -9,6 +9,7 @@
 
 // C++ Standard Library Headers
 #include <functional>
+#include <unordered_map>
 
 // Local Project Headers
 #include "Ops.h"
@@ -40,19 +41,23 @@ class VkSha256D {
 public:
     class Instance;
 
-    VkSha256D(const ::std::string&);
+    VkSha256D();
     ~VkSha256D();
 
     operator bool() const;
     operator VkResult() const { return m_vkResult; }
 
-    void ForEach(::std::function<void(Instance&)>);
+    bool Has(const IVkSha256DInstance::name_type&) const;
+
+    Instance Get(const IVkSha256DInstance::name_type&);
+
+    ::std::vector<IVkSha256DInstance::name_type> Available(void) const;
 
 private:
     VkResult m_vkResult;
     VkInstance m_instance;
 
-    ::std::vector<Instance> m_instances;
+    ::std::unordered_map<::std::string, ComputeDevice> m_devices;
 };
 
 class VkSha256D::Instance: public IVkSha256DInstance {

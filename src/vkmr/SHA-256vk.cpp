@@ -45,7 +45,7 @@ namespace vkmr {
 // Class(es)
 //
 
-VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
+VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
 
     using ::std::endl;
 
@@ -157,22 +157,14 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
                 continue;
             }
             oss << "Selected queue family #" << queueFamily << endl;
-
-            // If the caller specified a name, then check that it matches
-            // the device's declared name
-            const auto deviceName = ::std::string( vkPhysicalDeviceProperties.deviceName );
-            if (!name.empty( )){
-                if (deviceName != name){
-                    continue;
-                }
-            }
             ::std::cout << oss.str( ) << endl;
 
             // Create us a device to do the computation
             ComputeDevice device( vkPhysicalDevice, queueFamily, queueCount );
             if (static_cast<VkResult>( device ) == VK_SUCCESS){
                 // Wrap up and accumulate
-                m_instances.push_back( Instance( deviceName, ::std::move( device ) ) );
+                const auto deviceName = ::std::string( vkPhysicalDeviceProperties.deviceName );
+                m_devices.insert( { deviceName, ::std::move( device ) } );
                 continue;
             }
             ::std::cerr << "Failed to create a logical compute device on Vulkan" << std::endl;
@@ -215,7 +207,7 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
 
 VkSha256D::~VkSha256D() {
 
-    m_instances.clear( );
+    m_devices.clear( );
     if (m_instance != VK_NULL_HANDLE){
         ::vkDestroyInstance( m_instance, VK_NULL_HANDLE );
     }
@@ -226,11 +218,32 @@ VkSha256D::operator bool() const {
     if (m_instance == VK_NULL_HANDLE){
         return false;
     }
-    return !m_instances.empty( );
+    return !m_devices.empty( );
 }
 
-void VkSha256D::ForEach(::std::function<void(Instance&)> lambda) {
-    ::std::for_each( m_instances.begin( ), m_instances.end( ), lambda );
+bool VkSha256D::Has(const IVkSha256DInstance::name_type& name) const {
+    const auto found = m_devices.find( name );
+    return (found != m_devices.end( ));
+}
+
+VkSha256D::Instance VkSha256D::Get(const IVkSha256DInstance::name_type& name) {
+    const auto found = m_devices.find( name );
+    auto instance = VkSha256D::Instance( found->first, ::std::move( found->second ) );
+    m_devices.erase( found );
+    return instance;
+}
+
+::std::vector<IVkSha256DInstance::name_type> VkSha256D::Available(void) const {
+
+    ::std::vector<IVkSha256DInstance::name_type> names;
+    ::std::for_each(
+        m_devices.cbegin( ),
+        m_devices.cend( ),
+        [&names](const auto& pair) {
+            names.push_back( pair.first );
+        }
+    );
+    return names;
 }
 
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
