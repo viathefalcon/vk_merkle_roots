@@ -16,7 +16,6 @@
 // Local Project Headers
 #include "Debug.h"
 
-#if defined (VULKAN_SUPPORT)
 // Externals
 //
 
@@ -381,4 +380,3 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
 }
 
 } // namespace vkmr
-#endif // defined (VULKAN_SUPPORT)

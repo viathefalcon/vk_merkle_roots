@@ -4,14 +4,6 @@
 #ifndef __VKMR_DEVICES_H__
 #define __VKMR_DEVICES_H__
 
-// Macros
-//
-
-#if !defined (_MACOS_64_)
-#define VULKAN_SUPPORT
-#endif
-
-#if defined (VULKAN_SUPPORT)
 // Includes
 //
 
@@ -249,5 +241,4 @@ private:
 
 } // namespace vkmr
 
-#endif // VULKAN_SUPPORT
 #endif // __VKMR_DEVICES_H__

@@ -36,7 +36,6 @@ protected:
     name_type m_name;
 };
 
-#if defined (VULKAN_SUPPORT)
 class VkSha256D {
 public:
     class Instance;
@@ -90,5 +89,3 @@ private:
 #endif // defined (VULKAN_SUPPORT)
 
 } // namespace vkmr
-
-#endif // __SHA_256_VK_H__

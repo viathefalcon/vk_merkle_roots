@@ -14,7 +14,6 @@
 // Declarations
 #include "Batches.h"
 
-#if defined (VULKAN_SUPPORT)
 static const VkAllocationCallbacks *c_pAllocator = VK_NULL_HANDLE;
 
 namespace vkmr {
@@ -383,5 +382,3 @@ Batches& Batches::Reset(void) {
 }
 
 } // namespace vkmr
-
-#endif // VULKAN_SUPPORT

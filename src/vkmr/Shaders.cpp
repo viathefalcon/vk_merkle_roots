@@ -12,8 +12,6 @@
 // Declarations
 #include "Shaders.h"
 
-#if defined (VULKAN_SUPPORT)
-
 namespace vkmr {
 
 const VkAllocationCallbacks* ShaderModule::pAllocator = VK_NULL_HANDLE;
@@ -77,4 +75,3 @@ void ShaderModule::Release(void) {
 }
 
 }
-#endif // VULKAN_SUPPORT

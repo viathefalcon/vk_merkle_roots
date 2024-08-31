@@ -4,17 +4,9 @@
 #ifndef __VKMR_BATCHES_H__
 #define __VKMR_BATCHES_H__
 
-// Macros
-//
-
-#if !defined (_MACOS_64_)
-#define VULKAN_SUPPORT
-#endif
-
 // Includes
 //
 
-#if defined (VULKAN_SUPPORT)
 // Vulkan Headers
 #include <vulkan/vulkan.h>
 
@@ -183,5 +175,4 @@ private:
 
 } // namespace vkmr
 
-#endif // VULKAN_SUPPORT
 #endif // __VKMR_BATCHES_H__

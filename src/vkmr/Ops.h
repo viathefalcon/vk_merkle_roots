@@ -14,7 +14,6 @@
 #include "Slices.h"
 #include "Batches.h"
 
-#if defined (VULKAN_SUPPORT)
 namespace vkmr {
 // Classes
 //
@@ -40,5 +39,4 @@ public:
 };
 
 } // namespace vkmr
-#endif // VULKAN_SUPPORT
 #endif // __VKMR_OPS_H__

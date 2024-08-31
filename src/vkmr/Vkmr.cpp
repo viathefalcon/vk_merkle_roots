@@ -1,13 +1,6 @@
 // Vkmr.cpp: defines the entry point for the application
 //
 
-// Macros
-//
-
-#if !defined (_MACOS_64_)
-#define VULKAN_SUPPORT
-#endif
-
 // Includes
 //
 
@@ -38,7 +31,6 @@ int main(int argc, const char* argv[]) {
     using std::endl;
 
     vkmr::CpuSha256D mrc;
-#if defined (VULKAN_SUPPORT)
     std::string arg1;
     vkmr::VkSha256D instances;
     if (argc > 1){
@@ -68,7 +60,6 @@ int main(int argc, const char* argv[]) {
         return 1;
     }
     auto vkSha256D = instances.Get( arg1 );
-#endif
 
     // Loop over the inputs
     vkmr::Input input( stdin );
@@ -80,13 +71,11 @@ int main(int argc, const char* argv[]) {
             continue;
         }
 
-#if defined (VULKAN_SUPPORT)
         // Copy into the Vulkan-based instance
         bool ok = vkSha256D.Add( arg );
         if (!ok){
             break;
         }
-#endif
 
         if (!mrc.Add( std::move( arg ) )){
             std::cerr << "Failed to accumulate \"" << arg << "\"" << std::endl;
@@ -103,7 +92,6 @@ int main(int argc, const char* argv[]) {
             const auto root = mrc.Root( );
             cout << "Root (of " << count << " item(s), " << size << " byte(s)) => " << print_bytes( root ).str( ) << " in " << sw.Elapsed( ) << endl;
         }
-#if defined (VULKAN_SUPPORT)
         {
             cout << vkSha256D.Name( ) << ":" << endl;
             StopWatch sw;
@@ -111,7 +99,6 @@ int main(int argc, const char* argv[]) {
             const auto gpu_root = vkSha256D.Root( );
             cout << gpu_root << " (" << sw.Elapsed( ) << ")" << endl;
         }
-#endif
     }
     return 0;
 }

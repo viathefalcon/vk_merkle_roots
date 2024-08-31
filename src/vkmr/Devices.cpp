@@ -16,7 +16,6 @@
 // Declarations
 #include "Devices.h"
 
-#if defined (VULKAN_SUPPORT)
 // Externals
 //
 
@@ -661,4 +660,3 @@ void ComputeDevice::Release() {
 }
 
 }
-#endif // VULKAN_SUPPORT

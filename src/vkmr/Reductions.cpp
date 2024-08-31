@@ -17,7 +17,6 @@
 #include "Debug.h"
 #include "../common/Utils.h"
 
-#if defined (VULKAN_SUPPORT)
 // Externals
 //
 
@@ -870,9 +869,14 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
     const auto subgroupFeatureFlags = subgroupProperties.supportedOperations & subgroupFeatureFlagMask;
 
     // Check whether subgroups are supported and that they are of a suitable size
-    decltype(subgroupProperties.subgroupSize) subgroupSize = 1u;
+    decltype(subgroupProperties.subgroupSize) subgroupSize = 1U;
+#if defined(_MACOS_64_)
+    // Further work required for subgroups under MoltenVK..
+    auto subgroupsSupported = false;
+#else
     auto subgroupsSupported = 
         (subgroupFeatureFlags != 0) && ((subgroupProperties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+#endif
     if (subgroupsSupported){
         // Determine our target subgroup size, preferring the minimum declared for the device
         // as (anecdotally) using it with our shader produces predictable + consistent results
@@ -947,4 +951,3 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
 }
 
 } // namespace vkmr
-#endif // defined (VULKAN_SUPPORT)

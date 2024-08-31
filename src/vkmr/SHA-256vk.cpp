@@ -1,13 +1,6 @@
 // SHA-256vk.cpp: defines the functions for computing SHA-256 hashes with Vulkan
 //
 
-// Macros
-//
-
-#if !defined (_MACOS_64_)
-#define VULKAN_SUPPORT
-#endif
-
 // Includes
 //
 
@@ -17,16 +10,13 @@
 #include <sstream>
 #include <utility>
 
-#if defined (VULKAN_SUPPORT)
 // Vulkan Headers
 #include <vulkan/vulkan.h>
-#endif
 
 // Local Project Headers
 #include "Debug.h"
 #include "SHA-256vk.h"
 
-#if defined (VULKAN_SUPPORT)
 // Constants
 //
 
@@ -65,7 +55,7 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
     std::vector<char*> instanceExtNames;
     instanceExtNames.push_back( (char*) VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
     instanceExtNames.push_back( (char*) VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME );
-#if !defined(_ONDECK_)
+#if defined(_WIN32)
     VkValidationFeatureEnableEXT vkValidationFeatureEnableEXT[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
     VkValidationFeaturesEXT vkValidationFeaturesEXT = {};
     vkValidationFeaturesEXT.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
@@ -81,6 +71,11 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
     // Add the validation extensions
     instanceExtNames.push_back( (char*) "VK_EXT_validation_features" );
     instanceExtNames.push_back( (char*) "VK_EXT_debug_utils" );
+#endif
+#if defined(_MACOS_64_)
+    // To enable MoltenVK
+    instanceExtNames.push_back( (char*) VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME );
+    vkCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
     vkCreateInfo.enabledExtensionCount = instanceExtNames.size( );
     vkCreateInfo.ppEnabledExtensionNames = instanceExtNames.data( );
@@ -239,7 +234,7 @@ VkSha256D::Instance VkSha256D::Get(const IVkSha256DInstance::name_type& name) {
     ::std::for_each(
         m_devices.cbegin( ),
         m_devices.cend( ),
-        [&names](const auto& pair) {
+        [&names](const decltype(m_devices)::value_type& pair) {
             names.push_back( pair.first );
         }
     );
@@ -334,4 +329,3 @@ void VkSha256D::Instance::Cap(size_t size) {
 }
 
 } // namespace vkmr
-#endif // defined (VULKAN_SUPPORT)

@@ -10,7 +10,6 @@
 // Local Project Headers
 #include "Devices.h"
 
-#if defined (VULKAN_SUPPORT)
 namespace vkmr {
 
 // Templates
@@ -161,14 +160,13 @@ public:
         // * the largest slice we can reduce in one pass
         // * the maximum the system (says it) will let us allocate.
         // * the maximum buffer range
-        using ::std::min;
         const VkPhysicalDeviceProperties& vkPhysicalDeviceProperties = vkPhysicalDeviceProperties2.properties;
-        auto vkSliceSize = sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
+        VkDeviceSize vkSliceSize = sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
         if (vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize > 0U){
-            vkSliceSize = min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
+            vkSliceSize = ::std::min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
         }
         if (vkPhysicalDeviceProperties.limits.maxStorageBufferRange > 0U){
-            vkSliceSize = min(
+            vkSliceSize = ::std::min(
                 vkSliceSize,
                 static_cast<decltype( vkSliceSize )>( vkPhysicalDeviceProperties.limits.maxStorageBufferRange )
             );
@@ -284,5 +282,4 @@ private:
 };
 
 } // namespace vkmr
-#endif // VULKAN_SUPPORT
 #endif // __VKMR_SLICES_H__
