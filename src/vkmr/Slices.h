@@ -142,8 +142,8 @@ public:
 
     // Allocates and returns a new slice of on-device memory from the
     // given device (GPU) which can hold some whole number of elements
-    // up to a given maximum
-    static Slice New(ComputeDevice& device, VkDeviceSize vkMaxSize) {
+    // not smaller than a given minimum
+    static Slice New(ComputeDevice& device, VkDeviceSize vkMinSize) {
 
         // Be pessimistic - start w/an empty slice
         Slice slice;
@@ -157,41 +157,55 @@ public:
         vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceMaintenance3Properties;
         device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
 
-        // The size of a slice is the smaller of:
-        // 1. the most we can use (in one whack)
-        // 2. the maximum allowed allocation size, provided to us by the caller
-        // 3. the available on-device memory
+        // We want the smaller of: 
+        // * the largest slice we can reduce in one pass
+        // * the maximum the system (says it) will let us allocate.
+        // * the maximum buffer range
+        using ::std::min;
         const VkPhysicalDeviceProperties& vkPhysicalDeviceProperties = vkPhysicalDeviceProperties2.properties;
-        auto vkSliceSize = ::std::min(
-            sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0],
-            vkMaxSize
-        );
+        auto vkSliceSize = sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
         if (vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize > 0U){
-            vkSliceSize = ::std::min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
+            vkSliceSize = min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
         }
-        vkSliceSize = vkSliceSize - (vkSliceSize % sizeof( T ));
+        if (vkPhysicalDeviceProperties.limits.maxStorageBufferRange > 0U){
+            vkSliceSize = min(
+                vkSliceSize,
+                static_cast<decltype( vkSliceSize )>( vkPhysicalDeviceProperties.limits.maxStorageBufferRange )
+            );
+        }
 
-        // Look for corresponding on-device memory
-        const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSliceSize );
-        auto deviceMemoryBudgets = device.AvailableMemoryTypes(
-            vkMemoryRequirements,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-        );
+        // Loop until we've maybe allocated _something_
+        VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
+        do {
+            // Adjust for whole element size
+            vkSliceSize = vkSliceSize - (vkSliceSize % sizeof( T ));
 
-        // Iterate and try to allocate
-        for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
-            const auto& deviceMemoryBudget = *it;
-            if (deviceMemoryBudget.vkMemoryBudget < vkSliceSize){
-                // Nah, not interested
-                continue;
+            // Look for corresponding on-device memory
+            const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSliceSize );
+            auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+                vkMemoryRequirements,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+            );
+            const auto vkAllocationSize = vkMemoryRequirements.size;
+            std::cout << "Looking for " << vkAllocationSize << " bytes of sliced memory.." << std::endl;
+
+            // Iterate and try to allocate
+            for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); (vkDeviceMemory == VK_NULL_HANDLE) && (it != end); it++){
+                const auto& deviceMemoryBudget = *it;
+                if (deviceMemoryBudget.vkMemoryBudget < vkAllocationSize){
+                    // Nah, not interested
+                    continue;
+                }
+                vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkAllocationSize );
             }
 
-            auto vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkSliceSize );
             if (vkDeviceMemory == VK_NULL_HANDLE){
-                // Keep going
+                // Try again for half the size?
+                vkSliceSize = (vkSliceSize >> 1);
                 continue;
             }
 
+            // Otherwise, try and wrap it all up
             const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
             auto vkDevice = *device;
 
@@ -218,12 +232,13 @@ public:
                 // Bingo
                 slice = Slice( vkDevice, vkBuffer, vkDeviceMemory, vkSliceSize );
             }else{
+                // Bail
                 device.Free( vkDeviceMemory );
             }
 
-            // Can stop here, regardless
+            // Can stop here, regardless?
             break;
-        }
+        } while (vkSliceSize >= vkMinSize);
         return slice;
     }
 
