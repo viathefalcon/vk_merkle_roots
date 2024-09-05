@@ -368,7 +368,7 @@
         },
         {
             "type": "shell",
-            "label": "(Nac) Build Random Input Generator",
+            "label": "(Mac) Build Random Input Generator",
             "command": "g++",
             "args": [
                 "-std=c++11",

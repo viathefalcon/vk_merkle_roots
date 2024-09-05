@@ -247,7 +247,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
                         break;
                     }
                     ::vkCmdCopyBuffer( vkCommandBuffer, slice.Buffer( ), slice.Buffer( ), 1, &vkBufferCopy );
-                    //std::cout << "Duplicating item at " << int64_t(vkBufferCopy.srcOffset) << " to " << int64_t(vkBufferCopy.dstOffset) << "; count == " << count << ", delta == " << delta << std::endl;
+                    std::cout << "Duplicating item at " << int64_t(vkBufferCopy.srcOffset) << " to " << int64_t(vkBufferCopy.dstOffset) << "; count == " << count << ", delta == " << delta << std::endl;
                     count += 1U;
 
                     // Now we need a barrier between the copy and the shader invocation, below
@@ -857,11 +857,11 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
     const auto subgroupFeatureFlagMask = int(VK_SUBGROUP_FEATURE_BASIC_BIT) | int(VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT);
 
     // Query for subgroup support/size
-    VkPhysicalDeviceVulkan13Properties vkPhysicalDeviceVulkan13Properties = {};
-    vkPhysicalDeviceVulkan13Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT vkPhysicalDeviceSubgroupSizeControlProperties = {};
+    vkPhysicalDeviceSubgroupSizeControlProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
     VkPhysicalDeviceSubgroupProperties subgroupProperties = {};
     subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    subgroupProperties.pNext = &vkPhysicalDeviceVulkan13Properties;
+    subgroupProperties.pNext = &vkPhysicalDeviceSubgroupSizeControlProperties;
     VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
     vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     vkPhysicalDeviceProperties2.pNext = &subgroupProperties;
@@ -882,8 +882,8 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         // as (anecdotally) using it with our shader produces predictable + consistent results
         // on Intel integrated GPUs (e.g. "Intel(R) Iris(R) Xe Graphics")
         subgroupSize = subgroupProperties.subgroupSize;
-        if (vkPhysicalDeviceVulkan13Properties.minSubgroupSize > 1U){
-            subgroupSize = vkPhysicalDeviceVulkan13Properties.minSubgroupSize;
+        if (vkPhysicalDeviceSubgroupSizeControlProperties.minSubgroupSize > 1U){
+            subgroupSize = vkPhysicalDeviceSubgroupSizeControlProperties.minSubgroupSize;
         }
     }
     subgroupsSupported = (subgroupSize > 1U);
