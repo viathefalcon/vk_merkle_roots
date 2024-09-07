@@ -25,7 +25,7 @@ public:
 
     virtual VkFence Map(Batch&, Slice<VkSha256Result>&, VkQueue) = 0;
 
-    static ::std::unique_ptr<Mappings> New(ComputeDevice&);
+    static ::std::unique_ptr<Mappings> New(ComputeDevice&, uint32_t);
 };
 
 // Encapsulates reductions of slices of device memory to a single value

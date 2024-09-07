@@ -247,7 +247,7 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
     m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
     m_slice = slice_type::New( m_device, Mega256 );
-    m_mappings = Mappings::New( m_device );
+    m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );
     m_reductions = Reductions::New( m_device );
 }
 

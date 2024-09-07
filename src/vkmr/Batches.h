@@ -165,6 +165,10 @@ public:
     // Resets to an invalid state
     Batches& Reset(void);
 
+    // Returns the maximum number of batches that can
+    // be concurrently in flight for the given device
+    uint32_t MaxBatchCount(const ComputeDevice&) const;
+
 private:
     VkDeviceSize m_vkDataSize, m_vkMetadataSize;
 

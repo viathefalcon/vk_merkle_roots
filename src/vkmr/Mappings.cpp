@@ -233,9 +233,9 @@ void Mapping::Release(void) {
 
 class MappingsImpl : public Mappings {
 public:
-    MappingsImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline):
+    MappingsImpl(ComputeDevice& device, uint32_t capacity, vkmr::Pipeline&& pipeline):
         m_vkDevice( *device ),
-        m_descriptorPool( device.CreateDescriptorPool( 1, 3 ) ),
+        m_descriptorPool( device.CreateDescriptorPool( capacity, 3 * capacity ) ), // 1 set per potential concurrent mapping op
         m_commandPool( device.CreateCommandPool( ) ),
         m_pipeline( ::std::move( pipeline ) ) {
 
@@ -299,7 +299,7 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
     return static_cast<VkFence>( mapping );
 }
 
-::std::unique_ptr<Mappings> Mappings::New(ComputeDevice& device) {
+::std::unique_ptr<Mappings> Mappings::New(ComputeDevice& device, uint32_t capacity) {
 
     // Look for an early out
     ::std::unique_ptr<Mappings> mappings;
@@ -367,6 +367,7 @@ VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vk
         vkPushConstantRange.size = sizeof( MappingPushConstants );
         mappings.reset( new MappingsImpl(
             device,
+            capacity,
             vkmr::Pipeline(
                 vkDevice,
                 vkDescriptorSetLayout,

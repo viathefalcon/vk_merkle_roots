@@ -7,6 +7,7 @@
 // C++ Standard Library Headers
 #include <cstring>
 #include <algorithm>
+#include <unordered_map>
 
 // Local Project Headers
 #include "Debug.h"
@@ -379,6 +380,45 @@ Batches& Batches::Reset(void) {
     m_last = -1;
     m_vkDataSize = m_vkMetadataSize = 0U;
     return (*this);
+}
+
+uint32_t Batches::MaxBatchCount(const ComputeDevice& device) const {
+
+    // Look for an early out
+    if ((m_vkDataSize + m_vkMetadataSize) == 0U){
+        return 0U;
+    }
+    const auto dataRequirements = device.StorageBufferRequirements( m_vkDataSize );
+    const auto metadataRequirements = device.StorageBufferRequirements( m_vkMetadataSize );
+
+    // Get the memory budgets for compatible memory types
+    const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+        dataRequirements,
+        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    );
+
+    // Reduce down to the max per heap
+    ::std::unordered_map<uint32_t, VkDeviceSize> heaped;
+    for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
+        const auto& deviceMemoryBudget = *it;
+
+        // Look for the heap
+        const auto found = heaped.find( deviceMemoryBudget.heapIndex );
+        if (found == heaped.end( )){
+            heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemoryBudget } );
+            continue;
+        }
+        found->second = ::std::max( found->second, deviceMemoryBudget.vkMemoryBudget );
+    }
+
+    // Now iterate the heaps and sum up
+    uint32_t result = 0U;
+    const auto vkSize = dataRequirements.size + metadataRequirements.size;
+    for (auto it = heaped.cbegin( ), end = heaped.cend( ); it != end; ++it){
+        const auto count = static_cast<uint32_t>( it->second / vkSize );
+        result += count;
+    }
+    return result;
 }
 
 } // namespace vkmr
