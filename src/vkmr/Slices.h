@@ -7,6 +7,9 @@
 // Includes
 //
 
+// Nearby Project Headers
+#include "Utils.h"
+
 // Local Project Headers
 #include "Devices.h"
 
@@ -171,6 +174,11 @@ public:
                 static_cast<decltype( vkSliceSize )>( vkPhysicalDeviceProperties.limits.maxStorageBufferRange )
             );
         }
+
+        // Cap to the size needed to hold the largest possible
+        // number of elements which is a power of 2
+        const auto count = largest_pow2_le( vkSliceSize / sizeof( T ) );
+        vkSliceSize = count * sizeof( T );
 
         // Loop until we've maybe allocated _something_
         VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
