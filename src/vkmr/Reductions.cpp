@@ -509,7 +509,7 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
     this->Free( );
 
     // Get the (approx) memory requirements
-    m_count = slice.Reserved( );
+    m_count = slice.Count( );
     const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) );
     m_vkSize = vkMemoryRequirements.size;
 

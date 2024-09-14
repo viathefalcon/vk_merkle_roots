@@ -137,10 +137,6 @@ void Batch::Reset(void) {
 }
 
 void Batch::Release(void) {
-    if (*this){
-        ::std::cout << "Batch::Release()" << ::std::endl;
-    }
-
     m_data = Buffer( );
     m_metadata = Buffer( );
     Reset( );
