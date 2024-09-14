@@ -37,7 +37,7 @@ struct alignas(uint) MappingPushConstants {
 class Mapping {
 public:
     Mapping(Mapping&&);
-    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, uint32_t);
+    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, Batch&&, Slice<VkSha256Result>&&, uint32_t);
     Mapping(Mapping const&) = delete;
 
     Mapping(void) { Reset( ); }
@@ -49,8 +49,7 @@ public:
     operator VkResult() const { return m_vkResult; }
     operator VkFence() const { return m_vkFence; }
 
-    Mapping& Apply(Batch&, Slice<VkSha256Result>&, vkmr::Pipeline&);
-    VkResult Dispatch(VkQueue);
+    VkResult Dispatch(VkQueue, vkmr::Pipeline&);
 
 private:
     void Reset(void);
@@ -62,6 +61,8 @@ private:
 
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
+    Batch m_batch;
+    Slice<VkSha256Result> m_slice;
 
     uint32_t m_maxComputeWorkGroupCount;
 };
@@ -72,17 +73,21 @@ Mapping::Mapping(Mapping&& mapping):
     m_vkFence( mapping.m_vkFence ),
     m_descriptorSet( ::std::move( mapping.m_descriptorSet ) ),
     m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ),
+    m_batch( ::std::move( mapping.m_batch ) ),
+    m_slice( ::std::move( mapping.m_slice ) ),
     m_maxComputeWorkGroupCount( mapping.m_maxComputeWorkGroupCount ) {
     
     mapping.Reset( );
 }
 
-Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, uint32_t maxComputeWorkGroupCount):
+Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, Batch&& batch, Slice<VkSha256Result>&& slice, uint32_t maxComputeWorkGroupCount):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
     m_descriptorSet( ::std::move( descriptorSet ) ),
     m_commandBuffer( ::std::move( commandBuffer ) ),
+    m_batch( ::std::move( batch ) ),
+    m_slice( ::std::move( slice ) ),
     m_maxComputeWorkGroupCount( maxComputeWorkGroupCount ) {
 
     // Create the fence
@@ -101,6 +106,8 @@ Mapping& Mapping::operator=(Mapping&& mapping) {
         m_vkFence = mapping.m_vkFence;
         m_descriptorSet = ::std::move( mapping.m_descriptorSet );
         m_commandBuffer = ::std::move( mapping.m_commandBuffer );
+        m_batch = ::std::move( mapping.m_batch );
+        m_slice = ::std::move( mapping.m_slice );
         m_maxComputeWorkGroupCount = mapping.m_maxComputeWorkGroupCount;
 
         mapping.Reset( );
@@ -108,11 +115,17 @@ Mapping& Mapping::operator=(Mapping&& mapping) {
     return (*this);
 }
 
-Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeline& pipeline) {
+VkResult Mapping::Dispatch(VkQueue vkQueue, vkmr::Pipeline& pipeline) {
 
-    // Update the descriptor set
-    const auto batchBufferDescriptors = batch.BufferDescriptors( );
-    const auto sliceBufferDescriptor = slice.BufferDescriptor( );
+    // Reset the fence
+    m_vkResult = ::vkResetFences( m_vkDevice, 1, &m_vkFence );
+    if (m_vkResult != VK_SUCCESS){
+        return m_vkResult;
+    }
+
+     // Update the descriptor set
+    const auto batchBufferDescriptors = m_batch.BufferDescriptors( );
+    const auto sliceBufferDescriptor = m_slice.BufferDescriptor( );
     VkWriteDescriptorSet vkWriteDescriptorSetInputs = {};
     vkWriteDescriptorSetInputs.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     vkWriteDescriptorSetInputs.dstSet = *m_descriptorSet;
@@ -166,7 +179,7 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
         g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
         // Split into as many dispatches as are needed
-        const auto bound = static_cast<uint>( batch.Count( ) );
+        const auto bound = static_cast<uint>( m_batch.Count( ) );
         const auto& workgroupSize = pipeline.GetWorkGroupSize( );
         const auto count = workgroupSize.GetGroupCountX( bound );
         for (auto remaining = count; remaining > 0U; ){
@@ -178,7 +191,7 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
             // Push the constants
             MappingPushConstants pc = { 0U };
             pc.offset = workgroupSize.x * (count - remaining);
-            pc.bound = batch.Count( );
+            pc.bound = m_batch.Count( );
             ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
 
             // Actually dispatch the shader invocations
@@ -188,23 +201,8 @@ Mapping& Mapping::Apply(Batch& batch, Slice<VkSha256Result>& slice, vkmr::Pipeli
             remaining -= x;
         }
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
-    }
-    return (*this);
-}
-
-VkResult Mapping::Dispatch(VkQueue vkQueue) {
-
-    // Look for an early out
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
-    }
-
-    // Reset the fence
-    m_vkResult = ::vkResetFences( m_vkDevice, 1, &m_vkFence );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
-    }
-    VkCommandBuffer commandBuffers[] = { *m_commandBuffer };
+    }   
+    VkCommandBuffer commandBuffers[] = { vkCommandBuffer };
 
     // Submit the (presumably previously-recordded) commands onto the queue
     VkSubmitInfo vkSubmitInfo = {};
@@ -235,6 +233,7 @@ class MappingsImpl : public Mappings {
 public:
     MappingsImpl(ComputeDevice& device, uint32_t capacity, vkmr::Pipeline&& pipeline):
         m_vkDevice( *device ),
+        m_capacity( capacity ),
         m_descriptorPool( device.CreateDescriptorPool( capacity, 3 * capacity ) ), // 1 set per potential concurrent mapping op
         m_commandPool( device.CreateCommandPool( ) ),
         m_pipeline( ::std::move( pipeline ) ) {
@@ -252,11 +251,15 @@ public:
         m_pipeline = Pipeline( );
     }
 
-    VkFence Map(Batch&, Slice<VkSha256Result>&, VkQueue);
+    VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue);
+
+    void Update(void);
+
+    void WaitFor(void);
 
 private:
     VkDevice m_vkDevice;
-    uint32_t m_maxComputeWorkGroupCount;
+    uint32_t m_maxComputeWorkGroupCount, m_capacity;
 
     DescriptorPool m_descriptorPool;
     CommandPool m_commandPool;
@@ -265,38 +268,62 @@ private:
     ::std::vector<Mapping> m_container;
 };
 
-VkFence MappingsImpl::Map(Batch& batch, Slice<VkSha256Result>& slice, VkQueue vkQueue) {
+VkResult MappingsImpl::Map(Batch&& batch, Slice<VkSha256Result>&& slice, VkQueue queue) {
 
-    using ::std::cerr;
-    using ::std::endl;
+    // Descriptor sets is the limiting factor on the number of potential in-flight mappings
+    const auto ok = (m_container.size( ) < m_capacity);
+    auto descriptorSet = ok ? m_descriptorPool.AllocateDescriptorSet( m_pipeline ) : DescriptorSet( );
 
-    // Get us a reference to a mapping instance
-    if (m_container.empty( )){
-        m_container.push_back(
-            Mapping(
-                m_vkDevice,
-                m_descriptorPool.AllocateDescriptorSet( m_pipeline ),
-                m_commandPool.AllocateCommandBuffer( ),
-                m_maxComputeWorkGroupCount
-            )
-        );
+    // Create a new mapping
+    m_container.push_back(
+        Mapping(
+            m_vkDevice,
+            ::std::move( descriptorSet ),
+            m_commandPool.AllocateCommandBuffer( ),
+            ::std::move( batch ),
+            ::std::move( slice ),
+            m_maxComputeWorkGroupCount
+        )
+    );
+    if (ok){
+        // Dispatch the mapping onto the queue
+        auto& mapping = m_container.back( );
+        return mapping.Dispatch( queue, m_pipeline );
     }
-    auto& mapping = m_container.front( );
+    return VK_ERROR_OUT_OF_POOL_MEMORY;
+}
 
-    // Apply the mapping from the batch to the slice
-    mapping.Apply( batch, slice, m_pipeline );
-    auto vkResult = static_cast<VkResult>( mapping );
-    if (vkResult != VK_SUCCESS){
-        // Ack
-        cerr << "Failed to apply the mapping with error: " << static_cast<int64_t>( vkResult ) << endl;
-        return VK_NULL_HANDLE;
+void MappingsImpl::Update(void) {
+
+    for (auto it = m_container.cbegin( ); it != m_container.cend( ); ) {
+        // Get the current status
+        auto status = ::vkGetFenceStatus( m_vkDevice, static_cast<VkFence>( *it ) );
+        if (status == VK_SUCCESS){
+            // Retire the mapping by removing from hte
+            it = m_container.erase( it );
+        }else{
+            // Check again later; for now, just advance
+            ++it;
+        }
     }
-    vkResult = mapping.Dispatch( vkQueue );
-    if (vkResult != VK_SUCCESS){
-        cerr << "Failed to dispatch the mapping operation with error: " << static_cast<int64_t>( vkResult ) << endl;
-        return VK_NULL_HANDLE;
+}
+
+void MappingsImpl::WaitFor(void) {
+
+    // Get the in-flight mappings as a vector of fences
+    ::std::vector<VkFence> fences;
+    for (auto it = m_container.cbegin( ), end = m_container.cend( ); it != end; ++it) {
+        fences.push_back( static_cast<VkFence>( *it ) );
     }
-    return static_cast<VkFence>( mapping );
+    if (fences.empty( )){
+        return;
+    }
+
+    // Wait on them all
+    ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
+
+    // Retire them all
+    m_container.clear( );
 }
 
 ::std::unique_ptr<Mappings> Mappings::New(ComputeDevice& device, uint32_t capacity) {

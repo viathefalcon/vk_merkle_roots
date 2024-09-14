@@ -45,7 +45,7 @@ public:
     operator VkSha256Result() const { return m_vkSha256Result; }
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&) = 0;
-    virtual VkResult Dispatch(VkFence, VkQueue) = 0;
+    virtual VkResult Dispatch(VkQueue) = 0;
 
 protected:
     Reduction(): m_vkResult( VK_RESULT_MAX_ENUM ) { }
@@ -68,7 +68,7 @@ public:
     BasicReduction& operator=(BasicReduction&&);
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
-    virtual VkResult Dispatch(VkFence, VkQueue);
+    virtual VkResult Dispatch(VkQueue);
 
 private:
     void Free(void);
@@ -143,7 +143,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
     this->Free( );
 
     // Get the (approx) memory requirements
-    m_count = slice.Reserved( );
+    m_count = slice.Count( );
     const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) * m_count );
     m_vkSize = vkMemoryRequirements.size;
 
@@ -321,7 +321,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
     return (*this);
 }
 
-VkResult BasicReduction::Dispatch(VkFence vkFence, VkQueue vkQueue) {
+VkResult BasicReduction::Dispatch(VkQueue vkQueue) {
 
     // Look for an early out
     if (m_vkResult != VK_SUCCESS){
@@ -329,12 +329,6 @@ VkResult BasicReduction::Dispatch(VkFence vkFence, VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
-    }
-
-    // Wait on the provided fence
-    m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &vkFence, true, uint64_t(-1) );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
     }
 
     // Reset the fence
@@ -440,7 +434,7 @@ public:
     ReductionBySubgroup& operator=(ReductionBySubgroup&&);
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
-    virtual VkResult Dispatch(VkFence, VkQueue);
+    virtual VkResult Dispatch(VkQueue);
 
 private:
     void Free(void);
@@ -659,7 +653,7 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
     return (*this);
 }
 
-VkResult ReductionBySubgroup::Dispatch(VkFence vkFence, VkQueue vkQueue) {
+VkResult ReductionBySubgroup::Dispatch(VkQueue vkQueue) {
 
     // Look for an early out
     if (m_vkResult != VK_SUCCESS){
@@ -667,12 +661,6 @@ VkResult ReductionBySubgroup::Dispatch(VkFence vkFence, VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
-    }
-
-    // Wait on the provided fence
-    m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &vkFence, true, uint64_t(-1) );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
     }
 
     // Reset the fence
@@ -796,7 +784,7 @@ public:
         m_pipeline = vkmr::Pipeline( );
     }
 
-    VkSha256Result Reduce(VkFence, VkQueue, Slice<VkSha256Result>&, ComputeDevice&);
+    VkSha256Result Reduce(Slice<VkSha256Result>&, ComputeDevice&);
 
 private:
     VkDevice m_vkDevice;
@@ -809,7 +797,7 @@ private:
     ::std::vector<ReductionFactory::ProductType> m_container;
 };
 
-VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<VkSha256Result>& slice, ComputeDevice& device) {
+VkSha256Result ReductionsImpl::Reduce(Slice<VkSha256Result>& slice, ComputeDevice& device) {
 
     using ::std::cerr;
     using ::std::endl;
@@ -835,7 +823,10 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( vkResult ) << endl;
         return vkSha256Result;
     }
-    vkResult = reduction->Dispatch( vkFence, vkQueue );
+
+    // Dispatch it
+    auto vkQueue = device.Queue( 0 );
+    vkResult = reduction->Dispatch( vkQueue );
     if (vkResult != VK_SUCCESS){
         cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;
         return vkSha256Result;

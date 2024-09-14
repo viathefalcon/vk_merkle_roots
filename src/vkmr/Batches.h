@@ -12,7 +12,6 @@
 
 // C++ Standard Library Headers
 #include <memory>
-#include <vector>
 
 // Local Project Headers
 #include "Devices.h"
@@ -55,6 +54,17 @@ public:
     // Returns the number of strings in the batch
     size_t Count(void) const { return m_count; }
 
+    // Returns true if the batch is empty; false otherwise
+    bool Empty(void) const {
+        if (!(*this)){
+            return true;
+        }
+        return (this->Count( ) == 0U);
+    }
+
+    // Returns the batch number
+    number_type Number(void) const { return m_number; }
+
     // Pushes the given string onto the batch
     bool Push(const char*, size_t);
 
@@ -63,33 +73,6 @@ public:
 
     // Returns the buffer descriptors
     VkBufferDescriptors BufferDescriptors(void) const;
-
-    // Locks the batch for further writing
-    Batch& Lock(void) {
-        m_locked = true;
-        return (*this);
-    }
-
-    // Unlocks the batch for further writing
-    Batch& Unlock(void) {
-        m_locked = false;
-        return (*this);
-    }
-
-    // Returns true if the batch is locked; false otherwise
-    inline bool IsLocked(void) const {
-        return m_locked;
-    }
-
-    // Enables the batch for re-use
-    Batch& Reuse(void) {
-        Unlock( );
-        m_count = 0U;
-        return (*this);
-    }
-
-    // Returns the batch number
-    number_type Number(void) const { return m_number; }
 
 private:
     struct Buffer {
@@ -132,9 +115,6 @@ private:
     // Gives the number of inputs in the batch
     size_t m_count;
 
-    // Indicates whether the batch is locked for further writing
-    bool m_locked;
-
     // Gives the batch number
     number_type m_number;
 };
@@ -147,34 +127,24 @@ public:
     Batches(VkDeviceSize vkDataSize, VkDeviceSize vkMetadataSize):
         m_vkDataSize( vkDataSize ),
         m_vkMetadataSize( vkMetadataSize ),
-        m_last( -1 ) { }
+        m_count( 0U ) { }
 
-    Batch& operator[](int);
     Batches& operator=(Batches&&) noexcept;
     Batches& operator=(Batches const&) = delete;
     operator bool() const {
         return (m_vkDataSize > 0U) && (m_vkMetadataSize > 0U);
     }
 
-    // Returns a reference to a batch available for writing
-    Batch& Get(ComputeDevice&);
-
-    // Returns a reference to the most-recently-got batch
-    Batch& Last(void);
-
-    // Resets to an invalid state
-    Batches& Reset(void);
-
     // Returns the maximum number of batches that can
     // be concurrently in flight for the given device
     uint32_t MaxBatchCount(const ComputeDevice&) const;
 
+    // Instantiates and returns a new batch
+    Batch NewBatch(ComputeDevice&);
+
 private:
     VkDeviceSize m_vkDataSize, m_vkMetadataSize;
-
-    int m_last;
-    ::std::vector<Batch> m_batches;
-    Batch m_empty;
+    uint32_t m_count;
 };
 
 } // namespace vkmr

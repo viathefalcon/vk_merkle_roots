@@ -255,6 +255,7 @@ VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( ::std::move( instance.m_device ) ),
     m_slice( ::std::move( instance.m_slice ) ),
+    m_batch( ::std::move( instance.m_batch ) ),
     m_batches( ::std::move( instance.m_batches ) ),
     m_mappings( ::std::move( instance.m_mappings ) ),
     m_reductions( ::std::move( instance.m_reductions ) ) {
@@ -263,7 +264,7 @@ VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
 VkSha256D::Instance::~Instance() {
 
     m_slice = slice_type( );
-    m_batches.Reset( );
+    m_batch = Batch( );
     m_mappings.reset( );
     m_reductions.reset( );
 }
@@ -273,6 +274,7 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
     m_name = instance.Name( );
     m_device = ::std::move( instance.m_device );
     m_slice = ::std::move( instance.m_slice );
+    m_batch = ::std::move( instance.m_batch );
     m_batches = ::std::move( instance.m_batches );
     m_mappings = ::std::move( instance.m_mappings );
     m_reductions = ::std::move( instance.m_reductions );
@@ -281,51 +283,51 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
 VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
 
-    using ::std::cerr;
-    using ::std::endl;
-
-    // Get a handle to a queue
-    VkQueue vkQueue = m_device.Queue( 0 );
-    if (vkQueue == VK_NULL_HANDLE){
-        cerr << "Failed to retrieve handle to device queue!" << endl;
-        return "<vkQueue>";
+    // If the current batch is not empty, then send it off for mapping
+    auto& slice = m_slice;
+    if (!m_batch.Empty( )){
+        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
     }
 
-    // Map the inputs into the slice
-    auto& batch = m_batches.Last( );
-    auto mapping = m_mappings->Map( batch, m_slice, vkQueue );
-    if (mapping == VK_NULL_HANDLE){
-        return "<mapping>";
-    }
+    // Wait for all mappings to finish
+    m_mappings->WaitFor( );
 
     // Apply the reduction
-    auto vkSha256Result = m_reductions->Reduce( mapping, vkQueue, m_slice, m_device );
+    auto vkSha256Result = m_reductions->Reduce( slice, m_device );
     return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
+    // Setup
     auto& slice = m_slice;
-    auto push = [&slice, &arg](Batch& batch) -> bool {
-        if (batch.Push( arg.c_str( ), arg.size( ) )){
-            if (slice.Reserve( )){
-                return true;
-            }
-            batch.Pop( );
+    auto reserve = [&](void) -> bool {
+        if (slice.Reserve( )){
+            // Happy days
+            return true;
+        }else{
+            m_batch.Pop( );
+            return false;
         }
-        return false;
     };
-    if (!push( m_batches.Last( ) )){
-        return (push( m_batches.Get( m_device ) ));
-    }
-    return true;
-}
 
-void VkSha256D::Instance::Cap(size_t size) {
+    // Update the state of any in-flight mappings
+    m_mappings->Update( );
 
-    if (m_slice.Reserved( ) > size){
-        m_slice.Unreserve( m_slice.Reserved( ) - size );
+    // Try and add the input to the batch
+    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+        return reserve( );
+    }else{
+        // The batch may be full, in which case, immediately send it off for mapping..
+        if (m_batch){
+            m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
+        }
+        m_batch = m_batches.NewBatch( m_device );
     }
+    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+        return reserve( );
+    }
+    return false;
 }
 
 } // namespace vkmr

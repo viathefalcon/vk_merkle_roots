@@ -87,6 +87,9 @@ public:
     // Return the number of reservations in the slice
     size_t Reserved(void) const { return m_reserved; }
 
+    // Returns the number of elements in the slice
+    size_t Count(void) const { return m_sliced; }
+
     // Gets the sub slice encompassing the reservations since the last 
     // sub slice, if any
     Slice Get(void) {

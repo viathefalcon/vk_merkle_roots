@@ -75,13 +75,13 @@ public:
     out_type Root(void);
 
     bool Add(const arg_type&);
-    void Cap(size_t);
 
 private:
     typedef Slice<VkSha256Result> slice_type;
 
     ComputeDevice m_device;
     slice_type m_slice;
+    Batch m_batch;
     Batches m_batches;
     ::std::unique_ptr<Mappings> m_mappings;
     ::std::unique_ptr<Reductions> m_reductions;
