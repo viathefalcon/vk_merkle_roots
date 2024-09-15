@@ -1,13 +1,6 @@
 // SHA-256vk.cpp: defines the functions for computing SHA-256 hashes with Vulkan
 //
 
-// Macros
-//
-
-#if !defined (_MACOS_64_)
-#define VULKAN_SUPPORT
-#endif
-
 // Includes
 //
 
@@ -17,16 +10,18 @@
 #include <sstream>
 #include <utility>
 
-#if defined (VULKAN_SUPPORT)
 // Vulkan Headers
 #include <vulkan/vulkan.h>
-#endif
 
 // Local Project Headers
 #include "Debug.h"
 #include "SHA-256vk.h"
 
-#if defined (VULKAN_SUPPORT)
+// Constants
+//
+
+static const VkDeviceSize Mega256 = (256 * 1024 * 1024);
+
 // Globals
 //
 
@@ -40,7 +35,7 @@ namespace vkmr {
 // Class(es)
 //
 
-VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
+VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
 
     using ::std::endl;
 
@@ -60,7 +55,7 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
     std::vector<char*> instanceExtNames;
     instanceExtNames.push_back( (char*) VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
     instanceExtNames.push_back( (char*) VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME );
-#if !defined(_ONDECK_)
+#if defined(_WIN32)
     VkValidationFeatureEnableEXT vkValidationFeatureEnableEXT[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
     VkValidationFeaturesEXT vkValidationFeaturesEXT = {};
     vkValidationFeaturesEXT.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
@@ -76,6 +71,11 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
     // Add the validation extensions
     instanceExtNames.push_back( (char*) "VK_EXT_validation_features" );
     instanceExtNames.push_back( (char*) "VK_EXT_debug_utils" );
+#endif
+#if defined(_MACOS_64_)
+    // To enable MoltenVK
+    instanceExtNames.push_back( (char*) VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME );
+    vkCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
     vkCreateInfo.enabledExtensionCount = instanceExtNames.size( );
     vkCreateInfo.ppEnabledExtensionNames = instanceExtNames.data( );
@@ -152,22 +152,14 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
                 continue;
             }
             oss << "Selected queue family #" << queueFamily << endl;
-
-            // If the caller specified a name, then check that it matches
-            // the device's declared name
-            const auto deviceName = ::std::string( vkPhysicalDeviceProperties.deviceName );
-            if (!name.empty( )){
-                if (deviceName != name){
-                    continue;
-                }
-            }
             ::std::cout << oss.str( ) << endl;
 
             // Create us a device to do the computation
             ComputeDevice device( vkPhysicalDevice, queueFamily, queueCount );
             if (static_cast<VkResult>( device ) == VK_SUCCESS){
                 // Wrap up and accumulate
-                m_instances.push_back( Instance( deviceName, ::std::move( device ) ) );
+                const auto deviceName = ::std::string( vkPhysicalDeviceProperties.deviceName );
+                m_devices.insert( { deviceName, ::std::move( device ) } );
                 continue;
             }
             ::std::cerr << "Failed to create a logical compute device on Vulkan" << std::endl;
@@ -210,7 +202,7 @@ VkSha256D::VkSha256D(const ::std::string& name): m_instance( VK_NULL_HANDLE ) {
 
 VkSha256D::~VkSha256D() {
 
-    m_instances.clear( );
+    m_devices.clear( );
     if (m_instance != VK_NULL_HANDLE){
         ::vkDestroyInstance( m_instance, VK_NULL_HANDLE );
     }
@@ -221,37 +213,58 @@ VkSha256D::operator bool() const {
     if (m_instance == VK_NULL_HANDLE){
         return false;
     }
-    return !m_instances.empty( );
+    return !m_devices.empty( );
 }
 
-void VkSha256D::ForEach(::std::function<void(Instance&)> lambda) {
-    ::std::for_each( m_instances.begin( ), m_instances.end( ), lambda );
+bool VkSha256D::Has(const IVkSha256DInstance::name_type& name) const {
+    const auto found = m_devices.find( name );
+    return (found != m_devices.end( ));
+}
+
+VkSha256D::Instance VkSha256D::Get(const IVkSha256DInstance::name_type& name) {
+    const auto found = m_devices.find( name );
+    auto instance = VkSha256D::Instance( found->first, ::std::move( found->second ) );
+    m_devices.erase( found );
+    return instance;
+}
+
+::std::vector<IVkSha256DInstance::name_type> VkSha256D::Available(void) const {
+
+    ::std::vector<IVkSha256DInstance::name_type> names;
+    ::std::for_each(
+        m_devices.cbegin( ),
+        m_devices.cend( ),
+        [&names](const decltype(m_devices)::value_type& pair) {
+            names.push_back( pair.first );
+        }
+    );
+    return names;
 }
 
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
-    m_device( ::std::move( device ) ) {
+    m_device( ::std::move( device ) ),
+    m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
-    const VkDeviceSize Mega256 = (256 * 1024 * 1024);
-    m_batch = Batch::New( m_device, Mega256 );
     m_slice = slice_type::New( m_device, Mega256 );
-    m_mappings = Mappings::New( m_device );
+    m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );
     m_reductions = Reductions::New( m_device );
 }
 
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( ::std::move( instance.m_device ) ),
-    m_batch( ::std::move( instance.m_batch ) ),
     m_slice( ::std::move( instance.m_slice ) ),
+    m_batch( ::std::move( instance.m_batch ) ),
+    m_batches( ::std::move( instance.m_batches ) ),
     m_mappings( ::std::move( instance.m_mappings ) ),
     m_reductions( ::std::move( instance.m_reductions ) ) {
 }
 
 VkSha256D::Instance::~Instance() {
 
-    m_batch = Batch( );
     m_slice = slice_type( );
+    m_batch = Batch( );
     m_mappings.reset( );
     m_reductions.reset( );
 }
@@ -260,8 +273,9 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
     m_name = instance.Name( );
     m_device = ::std::move( instance.m_device );
-    m_batch = ::std::move( instance.m_batch );
     m_slice = ::std::move( instance.m_slice );
+    m_batch = ::std::move( instance.m_batch );
+    m_batches = ::std::move( instance.m_batches );
     m_mappings = ::std::move( instance.m_mappings );
     m_reductions = ::std::move( instance.m_reductions );
     return (*this);
@@ -269,44 +283,51 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
 VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
 
-    using ::std::cerr;
-    using ::std::endl;
-
-    // Get a handle to a queue
-    VkQueue vkQueue = m_device.Queue( 0 );
-    if (vkQueue == VK_NULL_HANDLE){
-        cerr << "Failed to retrieve handle to device queue!" << endl;
-        return "<vkQueue>";
+    // If the current batch is not empty, then send it off for mapping
+    auto& slice = m_slice;
+    if (!m_batch.Empty( )){
+        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
     }
 
-    // Map the inputs into the slice
-    auto mapping = m_mappings->Map( m_batch, m_slice, vkQueue );
-    if (mapping == VK_NULL_HANDLE){
-        return "<mapping>";
-    }
+    // Wait for all mappings to finish
+    m_mappings->WaitFor( );
 
     // Apply the reduction
-    auto vkSha256Result = m_reductions->Reduce( mapping, vkQueue, m_slice, m_device );
+    auto vkSha256Result = m_reductions->Reduce( slice, m_device );
     return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
-    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
-        if (m_slice.Reserve( )){
+    // Setup
+    auto& slice = m_slice;
+    auto reserve = [&](void) -> bool {
+        if (slice.Reserve( )){
+            // Happy days
             return true;
+        }else{
+            m_batch.Pop( );
+            return false;
         }
-        m_batch.Pop( );
+    };
+
+    // Update the state of any in-flight mappings
+    m_mappings->Update( );
+
+    // Try and add the input to the batch
+    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+        return reserve( );
+    }else{
+        // The batch may be full, in which case, immediately send it off for mapping..
+        if (m_batch){
+            m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
+        }
+        m_batch = m_batches.NewBatch( m_device );
+    }
+    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+        return reserve( );
     }
     return false;
 }
 
-void VkSha256D::Instance::Cap(size_t size) {
-
-    if (m_slice.Reserved( ) > size){
-        m_slice.Unreserve( m_slice.Reserved( ) - size );
-    }
-}
-
 } // namespace vkmr
-#endif // defined (VULKAN_SUPPORT)

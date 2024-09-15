@@ -16,7 +16,6 @@
 // Declarations
 #include "Devices.h"
 
-#if defined (VULKAN_SUPPORT)
 // Externals
 //
 
@@ -607,7 +606,7 @@ ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
         }
 
         // Map the index to the budget and accumulate
-        MemoryTypeBudget memoryTypeBudget = { index, budget, vkMemoryType->propertyFlags };
+        MemoryTypeBudget memoryTypeBudget = { vkMemoryType->heapIndex, index, budget, vkMemoryType->propertyFlags };
         memoryTypeBudgets.push_back( memoryTypeBudget );
     }
 
@@ -661,4 +660,3 @@ void ComputeDevice::Release() {
 }
 
 }
-#endif // VULKAN_SUPPORT

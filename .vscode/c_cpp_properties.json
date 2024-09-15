@@ -29,7 +29,10 @@
         },
         {
             "name": "macOS",
-            "includePath": ["${workspaceFolder}/**"],
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${env:VULKAN_SDK}/include"
+            ],
             "defines": [
                 "_DEBUG",
                 "_MACOS_64_"

@@ -14,7 +14,6 @@
 #include "Slices.h"
 #include "Batches.h"
 
-#if defined (VULKAN_SUPPORT)
 namespace vkmr {
 // Classes
 //
@@ -24,9 +23,15 @@ class Mappings {
 public:
     virtual ~Mappings(void) = default;
 
-    virtual VkFence Map(Batch&, Slice<VkSha256Result>&, VkQueue) = 0;
+    virtual VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue) = 0;
 
-    static ::std::unique_ptr<Mappings> New(ComputeDevice&);
+    // Updates the status of in-flight mappings
+    virtual void Update(void) = 0;
+
+    // Synchronously waits for all in-flight mappings to complete
+    virtual void WaitFor(void) = 0;
+
+    static ::std::unique_ptr<Mappings> New(ComputeDevice&, uint32_t);
 };
 
 // Encapsulates reductions of slices of device memory to a single value
@@ -34,11 +39,10 @@ class Reductions {
 public:
     virtual ~Reductions(void) = default;
 
-    virtual VkSha256Result Reduce(VkFence, VkQueue, Slice<VkSha256Result>&, ComputeDevice&) = 0;
+    virtual VkSha256Result Reduce(Slice<VkSha256Result>&, ComputeDevice&) = 0;
 
     static ::std::unique_ptr<Reductions> New(ComputeDevice&);
 };
 
 } // namespace vkmr
-#endif // VULKAN_SUPPORT
 #endif // __VKMR_OPS_H__

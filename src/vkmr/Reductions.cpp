@@ -15,9 +15,8 @@
 
 // Local Project Headers
 #include "Debug.h"
-#include "../common/Utils.h"
+#include "Utils.h"
 
-#if defined (VULKAN_SUPPORT)
 // Externals
 //
 
@@ -46,7 +45,7 @@ public:
     operator VkSha256Result() const { return m_vkSha256Result; }
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&) = 0;
-    virtual VkResult Dispatch(VkFence, VkQueue) = 0;
+    virtual VkResult Dispatch(VkQueue) = 0;
 
 protected:
     Reduction(): m_vkResult( VK_RESULT_MAX_ENUM ) { }
@@ -69,7 +68,7 @@ public:
     BasicReduction& operator=(BasicReduction&&);
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
-    virtual VkResult Dispatch(VkFence, VkQueue);
+    virtual VkResult Dispatch(VkQueue);
 
 private:
     void Free(void);
@@ -144,7 +143,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
     this->Free( );
 
     // Get the (approx) memory requirements
-    m_count = slice.Reserved( );
+    m_count = slice.Count( );
     const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) * m_count );
     m_vkSize = vkMemoryRequirements.size;
 
@@ -248,7 +247,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
                         break;
                     }
                     ::vkCmdCopyBuffer( vkCommandBuffer, slice.Buffer( ), slice.Buffer( ), 1, &vkBufferCopy );
-                    //std::cout << "Duplicating item at " << int64_t(vkBufferCopy.srcOffset) << " to " << int64_t(vkBufferCopy.dstOffset) << "; count == " << count << ", delta == " << delta << std::endl;
+                    std::cout << "Duplicating item at " << int64_t(vkBufferCopy.srcOffset) << " to " << int64_t(vkBufferCopy.dstOffset) << "; count == " << count << ", delta == " << delta << std::endl;
                     count += 1U;
 
                     // Now we need a barrier between the copy and the shader invocation, below
@@ -322,7 +321,7 @@ Reduction& BasicReduction::Apply(Slice<VkSha256Result>& slice, ComputeDevice& de
     return (*this);
 }
 
-VkResult BasicReduction::Dispatch(VkFence vkFence, VkQueue vkQueue) {
+VkResult BasicReduction::Dispatch(VkQueue vkQueue) {
 
     // Look for an early out
     if (m_vkResult != VK_SUCCESS){
@@ -330,12 +329,6 @@ VkResult BasicReduction::Dispatch(VkFence vkFence, VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
-    }
-
-    // Wait on the provided fence
-    m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &vkFence, true, uint64_t(-1) );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
     }
 
     // Reset the fence
@@ -441,7 +434,7 @@ public:
     ReductionBySubgroup& operator=(ReductionBySubgroup&&);
 
     virtual Reduction& Apply(Slice<VkSha256Result>&, ComputeDevice&, const vkmr::Pipeline&);
-    virtual VkResult Dispatch(VkFence, VkQueue);
+    virtual VkResult Dispatch(VkQueue);
 
 private:
     void Free(void);
@@ -516,7 +509,7 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
     this->Free( );
 
     // Get the (approx) memory requirements
-    m_count = slice.Reserved( );
+    m_count = slice.Count( );
     const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( sizeof( VkSha256Result ) );
     m_vkSize = vkMemoryRequirements.size;
 
@@ -660,7 +653,7 @@ Reduction& ReductionBySubgroup::Apply(Slice<VkSha256Result>& slice, ComputeDevic
     return (*this);
 }
 
-VkResult ReductionBySubgroup::Dispatch(VkFence vkFence, VkQueue vkQueue) {
+VkResult ReductionBySubgroup::Dispatch(VkQueue vkQueue) {
 
     // Look for an early out
     if (m_vkResult != VK_SUCCESS){
@@ -668,12 +661,6 @@ VkResult ReductionBySubgroup::Dispatch(VkFence vkFence, VkQueue vkQueue) {
     }
     if (m_count == 0){
         return VK_SUCCESS;
-    }
-
-    // Wait on the provided fence
-    m_vkResult = ::vkWaitForFences( m_vkDevice, 1, &vkFence, true, uint64_t(-1) );
-    if (m_vkResult != VK_SUCCESS){
-        return m_vkResult;
     }
 
     // Reset the fence
@@ -797,7 +784,7 @@ public:
         m_pipeline = vkmr::Pipeline( );
     }
 
-    VkSha256Result Reduce(VkFence, VkQueue, Slice<VkSha256Result>&, ComputeDevice&);
+    VkSha256Result Reduce(Slice<VkSha256Result>&, ComputeDevice&);
 
 private:
     VkDevice m_vkDevice;
@@ -810,7 +797,7 @@ private:
     ::std::vector<ReductionFactory::ProductType> m_container;
 };
 
-VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<VkSha256Result>& slice, ComputeDevice& device) {
+VkSha256Result ReductionsImpl::Reduce(Slice<VkSha256Result>& slice, ComputeDevice& device) {
 
     using ::std::cerr;
     using ::std::endl;
@@ -836,7 +823,10 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
         cerr << "Failed to apply the reduction with error: " << static_cast<int64_t>( vkResult ) << endl;
         return vkSha256Result;
     }
-    vkResult = reduction->Dispatch( vkFence, vkQueue );
+
+    // Dispatch it
+    auto vkQueue = device.Queue( 0 );
+    vkResult = reduction->Dispatch( vkQueue );
     if (vkResult != VK_SUCCESS){
         cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;
         return vkSha256Result;
@@ -858,11 +848,11 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
     const auto subgroupFeatureFlagMask = int(VK_SUBGROUP_FEATURE_BASIC_BIT) | int(VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT);
 
     // Query for subgroup support/size
-    VkPhysicalDeviceVulkan13Properties vkPhysicalDeviceVulkan13Properties = {};
-    vkPhysicalDeviceVulkan13Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT vkPhysicalDeviceSubgroupSizeControlProperties = {};
+    vkPhysicalDeviceSubgroupSizeControlProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
     VkPhysicalDeviceSubgroupProperties subgroupProperties = {};
     subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    subgroupProperties.pNext = &vkPhysicalDeviceVulkan13Properties;
+    subgroupProperties.pNext = &vkPhysicalDeviceSubgroupSizeControlProperties;
     VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
     vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     vkPhysicalDeviceProperties2.pNext = &subgroupProperties;
@@ -870,16 +860,21 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
     const auto subgroupFeatureFlags = subgroupProperties.supportedOperations & subgroupFeatureFlagMask;
 
     // Check whether subgroups are supported and that they are of a suitable size
-    decltype(subgroupProperties.subgroupSize) subgroupSize = 1u;
+    decltype(subgroupProperties.subgroupSize) subgroupSize = 1U;
+#if defined(_MACOS_64_)
+    // Further work required for subgroups under MoltenVK..
+    auto subgroupsSupported = false;
+#else
     auto subgroupsSupported = 
         (subgroupFeatureFlags != 0) && ((subgroupProperties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+#endif
     if (subgroupsSupported){
         // Determine our target subgroup size, preferring the minimum declared for the device
         // as (anecdotally) using it with our shader produces predictable + consistent results
         // on Intel integrated GPUs (e.g. "Intel(R) Iris(R) Xe Graphics")
         subgroupSize = subgroupProperties.subgroupSize;
-        if (vkPhysicalDeviceVulkan13Properties.minSubgroupSize > 1U){
-            subgroupSize = vkPhysicalDeviceVulkan13Properties.minSubgroupSize;
+        if (vkPhysicalDeviceSubgroupSizeControlProperties.minSubgroupSize > 1U){
+            subgroupSize = vkPhysicalDeviceSubgroupSizeControlProperties.minSubgroupSize;
         }
     }
     subgroupsSupported = (subgroupSize > 1U);
@@ -947,4 +942,3 @@ VkSha256Result ReductionsImpl::Reduce(VkFence vkFence, VkQueue vkQueue, Slice<Vk
 }
 
 } // namespace vkmr
-#endif // defined (VULKAN_SUPPORT)
