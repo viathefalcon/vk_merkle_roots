@@ -825,7 +825,7 @@ VkSha256Result ReductionsImpl::Reduce(Slice<VkSha256Result>& slice, ComputeDevic
     }
 
     // Dispatch it
-    auto vkQueue = device.Queue( 0 );
+    auto vkQueue = device.Queue( );
     vkResult = reduction->Dispatch( vkQueue );
     if (vkResult != VK_SUCCESS){
         cerr << "Failed to dispatch the reduction operation with error: " << static_cast<int64_t>( vkResult ) << endl;

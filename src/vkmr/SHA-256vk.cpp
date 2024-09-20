@@ -292,7 +292,7 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     // If the current batch is not empty, then send it off for mapping
     auto& slice = m_slice;
     if (!m_batch.Empty( )){
-        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
+        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( ) );
     }
 
     // Wait for all mappings to finish
@@ -343,10 +343,11 @@ bool VkSha256D::Instance::Flush(void) {
     if (m_batch.Push( m_buffer )){
         return reserve( );
     }
+
     // If we get here, then the batch may be full,
     // in which case, immediately send it off for mapping..
     if (m_batch){
-        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
+        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( ) );
     }
 
     // And, try again with a new batch
