@@ -258,7 +258,8 @@ VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     m_batch( ::std::move( instance.m_batch ) ),
     m_batches( ::std::move( instance.m_batches ) ),
     m_mappings( ::std::move( instance.m_mappings ) ),
-    m_reductions( ::std::move( instance.m_reductions ) ) {
+    m_reductions( ::std::move( instance.m_reductions ) ),
+    m_buffer( ::std::move( instance.m_buffer) ) {
 }
 
 VkSha256D::Instance::~Instance() {
@@ -267,6 +268,7 @@ VkSha256D::Instance::~Instance() {
     m_batch = Batch( );
     m_mappings.reset( );
     m_reductions.reset( );
+    m_buffer.clear( );
 }
 
 VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instance) {
@@ -278,10 +280,14 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
     m_batches = ::std::move( instance.m_batches );
     m_mappings = ::std::move( instance.m_mappings );
     m_reductions = ::std::move( instance.m_reductions );
+    m_buffer = ::std::move( instance.m_buffer );
     return (*this);
 }
 
 VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
+
+    // Flush the buffer
+    this->Flush( );
 
     // If the current batch is not empty, then send it off for mapping
     auto& slice = m_slice;
@@ -299,32 +305,53 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
+    // Update the state of any in-flight mappings
+    m_mappings->Update( );
+
+    // Add to the buffer, and check it if can be flushed
+    m_buffer.push_back( arg );
+    if (m_buffer.size( ) == m_slice.AlignedReservationSize( )){
+        return this->Flush( );
+    }
+
+    // We presume it will be able to..
+    return true;
+}
+
+bool VkSha256D::Instance::Flush(void) {
+
+    // Look for an early out
+    if (m_buffer.empty( )){
+        return true;
+    }
+    const auto count = m_buffer.size( );
+
     // Setup
     auto& slice = m_slice;
     auto reserve = [&](void) -> bool {
-        if (slice.Reserve( )){
+        if (slice.Reserve( count )){
             // Happy days
+            m_buffer.clear( );
             return true;
         }else{
-            m_batch.Pop( );
+            m_batch.Pop( count );
             return false;
         }
     };
 
-    // Update the state of any in-flight mappings
-    m_mappings->Update( );
-
-    // Try and add the input to the batch
-    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+    // Try and add the strings to the current batch
+    if (m_batch.Push( m_buffer )){
         return reserve( );
-    }else{
-        // The batch may be full, in which case, immediately send it off for mapping..
-        if (m_batch){
-            m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
-        }
-        m_batch = m_batches.NewBatch( m_device );
     }
-    if (m_batch.Push( arg.c_str( ), arg.size( ) )){
+    // If we get here, then the batch may be full,
+    // in which case, immediately send it off for mapping..
+    if (m_batch){
+        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( 0 ) );
+    }
+
+    // And, try again with a new batch
+    m_batch = m_batches.NewBatch( m_device );
+    if (m_batch.Push( m_buffer )){
         return reserve( );
     }
     return false;

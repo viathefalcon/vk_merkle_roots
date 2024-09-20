@@ -65,11 +65,11 @@ public:
     // Returns the batch number
     number_type Number(void) const { return m_number; }
 
-    // Pushes the given string onto the batch
-    bool Push(const char*, size_t);
+    // Pushes the given strings onto the batch
+    bool Push(const ::std::vector<::std::string>&);
 
-    // Pops the last string off the batch
-    void Pop(void);
+    // Pops the a given number of strings off the back of the batch
+    void Pop(size_t);
 
     // Returns the buffer descriptors
     VkBufferDescriptors BufferDescriptors(void) const;

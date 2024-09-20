@@ -23,6 +23,7 @@ template <typename T>
 class Slice {
 public:
     typedef T value_type;
+    typedef size_t size_type;
 
     Slice(void) { Reset( ); }
     Slice(Slice&& slice):
@@ -32,7 +33,8 @@ public:
         m_vkSize( slice.m_vkSize ),
         m_sliced( slice.m_sliced ),
         m_reserved( slice.m_reserved ),
-        m_capacity( slice.m_capacity ) {
+        m_capacity( slice.m_capacity ),
+        m_alignedCount( slice.m_alignedCount ) {
 
         slice.Reset( );
     }
@@ -52,6 +54,7 @@ public:
             m_sliced = slice.m_sliced;
             m_reserved = slice.m_reserved;
             m_capacity = slice.m_capacity;
+            m_alignedCount = slice.m_alignedCount;
 
             slice.Reset( );
         }
@@ -71,24 +74,30 @@ public:
         return m_vkSize;
     }
 
-    // Reserves a, er, slot (?) within the slice
-    bool Reserve(void) {
-        if (m_capacity > (m_sliced + m_reserved)){
-            m_reserved += 1U;
+    // Returns the number of elements needed for the slice
+    // to be correctly aligned at both ends
+    size_type AlignedReservationSize(void) const {
+        return m_alignedCount;
+    }
+
+    // Reserves a  given number of, er, slot(s) (?) within the slice
+    bool Reserve(size_type count = 1U) {
+        if ((m_capacity - (m_sliced + m_reserved)) > count){
+            m_reserved += count;
             return true;
         }
         return false;
     }
 
-    void Unreserve(size_t count = 1U) {
+    void Unreserve(size_type count = 1U) {
         m_reserved -= ::std::min( m_reserved, count );
     }
 
     // Return the number of reservations in the slice
-    size_t Reserved(void) const { return m_reserved; }
+    size_type Reserved(void) const { return m_reserved; }
 
     // Returns the number of elements in the slice
-    size_t Count(void) const { return m_sliced; }
+    size_type Count(void) const { return m_sliced; }
 
     // Gets the sub slice encompassing the reservations since the last 
     // sub slice, if any
@@ -260,6 +269,16 @@ private:
         m_sliced( 0U ),
         m_reserved( 0U ),
         m_capacity( vkSize / sizeof( T ) ) {
+
+        // Calcalate the number of elements needed for the slice to be correctly
+        // aligned at both ends
+        VkMemoryRequirements vkMemoryRequirements = {};
+        ::vkGetBufferMemoryRequirements( m_vkDevice, m_vkBuffer, &vkMemoryRequirements );
+        if (vkMemoryRequirements.alignment == 0){
+            m_alignedCount = 1;
+        }else{
+            m_alignedCount = lowest_common_multiple( sizeof( T ), vkMemoryRequirements.alignment ) / sizeof( T );
+        }
     }
 
     void Reset(void) {
@@ -268,7 +287,7 @@ private:
         m_vkBuffer = VK_NULL_HANDLE;
         m_vkDeviceMemory = VK_NULL_HANDLE;
         m_vkSize = 0U;
-        m_sliced = m_reserved = m_capacity = 0U;
+        m_sliced = m_reserved = m_capacity = m_alignedCount = 0U;
     }
 
     void Release(void) {
@@ -287,7 +306,7 @@ private:
     VkBuffer m_vkBuffer;
     VkDeviceMemory m_vkDeviceMemory;
     VkDeviceSize m_vkSize;
-    size_t m_sliced, m_reserved, m_capacity;
+    size_type m_sliced, m_reserved, m_capacity, m_alignedCount;
 
     static const VkBufferUsageFlags c_vkBufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 };

@@ -79,12 +79,18 @@ public:
 private:
     typedef Slice<VkSha256Result> slice_type;
 
+    // Flushes the contents of the buffer into
+    // the current batch/slice as appropriate
+    bool Flush(void);
+
     ComputeDevice m_device;
     slice_type m_slice;
     Batch m_batch;
     Batches m_batches;
+
     ::std::unique_ptr<Mappings> m_mappings;
     ::std::unique_ptr<Reductions> m_reductions;
+    ::std::vector<arg_type> m_buffer;
 };
 #endif // defined (VULKAN_SUPPORT)
 
