@@ -16,20 +16,23 @@ This helper program generates a specified volume of randomly-filled input string
 ## Building, Running
 The Visual Studio Code project includes tasks which will build the programs; it assumes that either the Visual C++ compiler (on Windows) or Clang (elsewhere) is on the `PATH`.
 
-### Steam Deck
+### On (Steam) Deck
 
-To build the project on Steam Deck, I run [VS Code in Flatpak](https://flathub.org/apps/com.visualstudio.code). For building, and running, on Steam Deck, the project has an implicit dependency on [LLVM v16](https://releases.llvm.org/16.0.0/docs/ReleaseNotes.html), which I satisfy with the [LLVM 16 extension for the flatpak Freedesktop SDK](https://github.com/flathub/org.freedesktop.Sdk.Extension.llvm16). I installed both VS Code and the LLVM 16 extension via the Discovery package manager.
+To build the project on Steam Deck, I run [VS Code in Flatpak](https://flathub.org/apps/com.visualstudio.code). For building, and running, on Steam Deck, the project has an implicit dependency on LLVM 18, which I satisfy with the [LLVM 18 extension for the flatpak Freedesktop SDK](https://github.com/flathub/org.freedesktop.Sdk.Extension.llvm18). I installed VS Code via the Discovery package manager, and the LLVM extension via the command-line:
+```
+flatpak install org.freedesktop.Sdk.Extension.llvm18
+```
 
 #### Launching VS Code
-(and enabling the LLVM16 extension)
+(and enabling the LLVM 18 extension)
 ```
-FLATPAK_ENABLE_SDK_EXT=llvm16 flatpak run --devel com.visualstudio.code
+FLATPAK_ENABLE_SDK_EXT=llvm18 flatpak run --devel com.visualstudio.code
 ```
 
 #### Launching Vulkan Merkle Roots
 The program, once built, also needs to run in a Flatpak container in which the LLVM16 extension is available. So, I open a shell in the VS Code sandbox:
 ```
-FLATPAK_ENABLE_SDK_EXT=llvm16 flatpak run --command=sh --devel com.visualstudio.code
+FLATPAK_ENABLE_SDK_EXT=llvm18 flatpak run --command=sh --devel com.visualstudio.code
 ```
 
 And, inside this shell:
