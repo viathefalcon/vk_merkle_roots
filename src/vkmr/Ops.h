@@ -44,7 +44,7 @@ public:
     // Initiates a new reduction of the given slice of on-device memory
     virtual VkSha256Result Reduce(slice_type&&, ComputeDevice&) = 0;
 
-    static ::std::unique_ptr<Reductions> New(ComputeDevice&);
+    static ::std::unique_ptr<Reductions> New(ComputeDevice&, typename slice_type::number_type);
 };
 
 } // namespace vkmr

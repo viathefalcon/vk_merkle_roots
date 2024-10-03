@@ -512,9 +512,9 @@ private:
 };
 class ReductionsImpl : public Reductions {
 public:
-    ReductionsImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline, bool subgroupSupportPreferred):
+    ReductionsImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline, DescriptorPool&& descriptorPool, bool subgroupSupportPreferred):
         m_vkDevice( *device ),
-        m_descriptorPool( device.CreateDescriptorPool( 1, 1 ) ),
+        m_descriptorPool( ::std::move( descriptorPool ) ),
         m_commandPool( device.CreateCommandPool( ) ),
         m_pipeline( ::std::move( pipeline ) ),
         m_factory( ReductionFactory( subgroupSupportPreferred ) ) { }
@@ -566,7 +566,7 @@ VkSha256Result ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDev
     return vkSha256Result;
 }
 
-::std::unique_ptr<Reductions> Reductions::New(ComputeDevice& device) {
+::std::unique_ptr<Reductions> Reductions::New(ComputeDevice& device, typename slice_type::number_type number) {
 
     // Look for an early out
     ::std::unique_ptr<Reductions> reductions;
@@ -649,6 +649,13 @@ VkSha256Result ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDev
         vkResult = ::vkCreateDescriptorSetLayout( vkDevice, &vkDescriptorSetLayoutCreateInfo, pAllocator, &vkDescriptorSetLayout );
     }
 
+    // Allocate a descriptor pool
+    ::std::cout << "Allocating for up to " << number << " concurrent reduction(s).." << ::std::endl;
+    auto descriptorPool = DescriptorPool( vkDevice, number, number );
+    if (!descriptorPool){
+        vkResult = descriptorPool;
+    }
+
     // Wrap it all up, maybe
     if (vkResult == VK_SUCCESS){
         // c.f. https://docs.vulkan.org/guide/latest/push_constants.html
@@ -667,6 +674,7 @@ VkSha256Result ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDev
                 ::std::move( shaderModule ),
                 pWorkgroupSize
             ),
+            ::std::move( descriptorPool ),
             subgroupsSupported
         ) );
     }

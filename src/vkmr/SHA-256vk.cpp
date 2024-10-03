@@ -244,11 +244,12 @@ VkSha256D::Instance VkSha256D::Get(const IVkSha256DInstance::name_type& name) {
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
     m_device( ::std::move( device ) ),
+    m_slices( Mega256 ),
     m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
-    m_slices.New( m_device, Mega256 );
+    m_slices.New( m_device );
     m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );
-    m_reductions = Reductions::New( m_device );
+    m_reductions = Reductions::New( m_device, m_slices.MaxSliceCount( m_device ) );
 }
 
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):

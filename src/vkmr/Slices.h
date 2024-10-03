@@ -238,9 +238,11 @@ public:
     typedef Slice<T> slice_type;
     typedef typename slice_type::number_type index_type;
 
-    Slices(): m_current( 0U ) { }
+    Slices(VkDeviceSize vkSliceSize): m_vkSliceSize( vkSliceSize ), m_current( 0U ) { }
+    Slices(): Slices( 0U ) { }
     Slices(Slices const&) = delete;
     Slices(Slices&& slices):
+        m_vkSliceSize( slices.m_vkSliceSize ),
         m_current( slices.m_current ),
         m_container( ::std::move( slices.m_container ) ),
         m_empty( ::std::move( slices.m_empty ) ) {
@@ -254,7 +256,8 @@ public:
         if (this != &slices){
             m_container.clear( );
 
-            m_current = 0U;
+            m_vkSliceSize = slices.m_vkSliceSize;
+            m_current = slices.m_current;
             m_container = ::std::move( slices.m_container );
             m_empty = ::std::move( slices.m_empty );
 
@@ -291,10 +294,12 @@ public:
     // Allocates and returns a new slice of on-device memory from the
     // given device (GPU) which can hold some whole number of elements
     // not smaller than a given minimum
-    slice_type& New(ComputeDevice& device, VkDeviceSize vkMinSize) {
+    slice_type& New(ComputeDevice& device) {
 
-        // Be pessimistic - start w/an empty slice
-        slice_type slice;
+        // Look for an early out
+        if (m_vkSliceSize == 0U){
+            return m_empty;
+        }
 
         // Query for the maximum number of concurrent invocations
         // and the per-device allocation limit
@@ -336,7 +341,7 @@ public:
             const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSliceSize );
             auto deviceMemoryBudgets = device.AvailableMemoryTypes(
                 vkMemoryRequirements,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                c_vkMemoryPropertyFlags
             );
             const auto vkAllocationSize = vkMemoryRequirements.size;
             std::cout << "Looking for " << vkAllocationSize << " bytes of sliced memory.." << std::endl;
@@ -393,19 +398,57 @@ public:
             }
             device.Free( vkDeviceMemory );
             break;
-        } while (vkSliceSize >= vkMinSize);
+        } while (vkSliceSize >= m_vkSliceSize);
         return m_empty;
     }
 
+    // Returns the maximum number of concurrent slices that can be allocated
+    // from the given (compute) device
+    index_type MaxSliceCount(const ComputeDevice& device) const {
+
+        // Get the memory budgets for compatible memory types
+        const auto dataRequirements = device.StorageBufferRequirements( m_vkSliceSize );
+        const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+            dataRequirements,
+            c_vkMemoryPropertyFlags
+        );
+
+        // Reduce down to the max per heap
+        ::std::unordered_map<uint32_t, VkDeviceSize> heaped;
+        for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); it != end; it++){
+            const auto& deviceMemoryBudget = *it;
+
+            // Look for the heap
+            const auto found = heaped.find( deviceMemoryBudget.heapIndex );
+            if (found == heaped.end( )){
+                heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemorySize } );
+                continue;
+            }
+            found->second = ::std::max( found->second, deviceMemoryBudget.vkMemorySize );
+        }
+
+        // Now iterate the heaps and sum up
+        index_type result = 0U;
+        for (auto it = heaped.cbegin( ), end = heaped.cend( ); it != end; ++it){
+            const auto count = static_cast<uint32_t>( it->second / m_vkSliceSize );
+            result += count;
+        }
+        return result;
+    } 
 private:
     void Reset(void) {
+        m_vkSliceSize = 0U;
         m_current = 0U;
         m_container.clear( );
     }
 
+    VkDeviceSize m_vkSliceSize;
     index_type m_current;
     ::std::unordered_map<index_type, slice_type> m_container;
     slice_type m_empty;
+
+    static const VkMemoryPropertyFlags c_vkMemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
 };
 
 } // namespace vkmr

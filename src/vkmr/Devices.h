@@ -104,7 +104,7 @@ private:
 typedef struct {
     uint32_t heapIndex;
     uint32_t memoryTypeIndex;
-    VkDeviceSize vkMemoryBudget;
+    VkDeviceSize vkMemoryBudget, vkMemorySize;
     VkMemoryPropertyFlags vkMemoryPropertyFlags;
 } MemoryTypeBudget;
 

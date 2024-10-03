@@ -614,7 +614,13 @@ ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
         }
 
         // Map the index to the budget and accumulate
-        MemoryTypeBudget memoryTypeBudget = { vkMemoryType->heapIndex, index, budget, vkMemoryType->propertyFlags };
+        MemoryTypeBudget memoryTypeBudget = {
+            vkMemoryType->heapIndex,
+            index,
+            budget,
+            pvkMemoryHeap->size,
+            vkMemoryType->propertyFlags
+        };
         memoryTypeBudgets.push_back( memoryTypeBudget );
     }
 

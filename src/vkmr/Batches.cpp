@@ -299,10 +299,10 @@ uint32_t Batches::MaxBatchCount(const ComputeDevice& device) const {
         // Look for the heap
         const auto found = heaped.find( deviceMemoryBudget.heapIndex );
         if (found == heaped.end( )){
-            heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemoryBudget } );
+            heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemorySize } );
             continue;
         }
-        found->second = ::std::max( found->second, deviceMemoryBudget.vkMemoryBudget );
+        found->second = ::std::max( found->second, deviceMemoryBudget.vkMemorySize );
     }
 
     // Now iterate the heaps and sum up
