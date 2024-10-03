@@ -37,9 +37,12 @@ public:
 // Encapsulates reductions of slices of device memory to a single value
 class Reductions {
 public:
+    typedef Slice<VkSha256Result> slice_type;
+
     virtual ~Reductions(void) = default;
 
-    virtual VkSha256Result Reduce(Slice<VkSha256Result>&, ComputeDevice&) = 0;
+    // Initiates a new reduction of the given slice of on-device memory
+    virtual VkSha256Result Reduce(slice_type&&, ComputeDevice&) = 0;
 
     static ::std::unique_ptr<Reductions> New(ComputeDevice&);
 };

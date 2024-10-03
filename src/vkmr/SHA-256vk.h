@@ -77,14 +77,12 @@ public:
     bool Add(const arg_type&);
 
 private:
-    typedef Slice<VkSha256Result> slice_type;
-
     // Flushes the contents of the buffer into
     // the current batch/slice as appropriate
     bool Flush(void);
 
     ComputeDevice m_device;
-    slice_type m_slice;
+    Slices<VkSha256Result> m_slices;
     Batch m_batch;
     Batches m_batches;
 

@@ -246,7 +246,7 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
     m_device( ::std::move( device ) ),
     m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
-    m_slice = slice_type::New( m_device, Mega256 );
+    m_slices.New( m_device, Mega256 );
     m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );
     m_reductions = Reductions::New( m_device );
 }
@@ -254,7 +254,7 @@ VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device)
 VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
     IVkSha256DInstance( instance.Name( ) ),
     m_device( ::std::move( instance.m_device ) ),
-    m_slice( ::std::move( instance.m_slice ) ),
+    m_slices( ::std::move( instance.m_slices ) ),
     m_batch( ::std::move( instance.m_batch ) ),
     m_batches( ::std::move( instance.m_batches ) ),
     m_mappings( ::std::move( instance.m_mappings ) ),
@@ -264,7 +264,7 @@ VkSha256D::Instance::Instance(VkSha256D::Instance&& instance):
 
 VkSha256D::Instance::~Instance() {
 
-    m_slice = slice_type( );
+    m_slices = Slices<VkSha256Result>( );
     m_batch = Batch( );
     m_mappings.reset( );
     m_reductions.reset( );
@@ -275,7 +275,7 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
 
     m_name = instance.Name( );
     m_device = ::std::move( instance.m_device );
-    m_slice = ::std::move( instance.m_slice );
+    m_slices = ::std::move( instance.m_slices );
     m_batch = ::std::move( instance.m_batch );
     m_batches = ::std::move( instance.m_batches );
     m_mappings = ::std::move( instance.m_mappings );
@@ -290,16 +290,19 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     this->Flush( );
 
     // If the current batch is not empty, then send it off for mapping
-    auto& slice = m_slice;
+    auto& current = m_slices.Current( );
     if (!m_batch.Empty( )){
-        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( ) );
+        m_mappings->Map( ::std::move( m_batch ), current.Get( ), m_device.Queue( ) );
     }
 
     // Wait for all mappings to finish
     m_mappings->WaitFor( );
 
     // Apply the reduction
-    auto vkSha256Result = m_reductions->Reduce( slice, m_device );
+    auto vkSha256Result = m_reductions->Reduce(
+        m_slices.Remove( current.Number( ) ),
+        m_device
+    );
     return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
@@ -310,7 +313,8 @@ bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
     // Add to the buffer, and check it if can be flushed
     m_buffer.push_back( arg );
-    if (m_buffer.size( ) == m_slice.AlignedReservationSize( )){
+    auto& slice = m_slices.Current( );
+    if (m_buffer.size( ) == slice.AlignedReservationSize( )){
         return this->Flush( );
     }
 
@@ -327,7 +331,7 @@ bool VkSha256D::Instance::Flush(void) {
     const auto count = m_buffer.size( );
 
     // Setup
-    auto& slice = m_slice;
+    auto& slice = m_slices.Current( );
     auto reserve = [&](void) -> bool {
         if (slice.Reserve( count )){
             // Happy days
@@ -351,7 +355,7 @@ bool VkSha256D::Instance::Flush(void) {
     }
 
     // And, try again with a new batch
-    m_batch = m_batches.NewBatch( m_device );
+    m_batch = m_batches.New( m_device );
     if (m_batch.Push( m_buffer )){
         return reserve( );
     }

@@ -140,7 +140,7 @@ public:
     uint32_t MaxBatchCount(const ComputeDevice&) const;
 
     // Instantiates and returns a new batch
-    Batch NewBatch(ComputeDevice&);
+    Batch New(ComputeDevice&);
 
 private:
     VkDeviceSize m_vkDataSize, m_vkMetadataSize;

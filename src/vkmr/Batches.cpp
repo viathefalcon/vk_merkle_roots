@@ -315,7 +315,7 @@ uint32_t Batches::MaxBatchCount(const ComputeDevice& device) const {
     return result;
 }
 
-Batch Batches::NewBatch(ComputeDevice& device) {
+Batch Batches::New(ComputeDevice& device) {
 
     // Look for an early out
     if (!(*this)){

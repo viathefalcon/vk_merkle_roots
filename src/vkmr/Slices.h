@@ -7,6 +7,9 @@
 // Includes
 //
 
+// C++ Standard Library Headers
+#include <unordered_map>
+
 // Nearby Project Headers
 #include "Utils.h"
 
@@ -15,6 +18,12 @@
 
 namespace vkmr {
 
+// Forward Declarations
+//
+
+template <typename T>
+class Slices;
+
 // Templates
 //
 
@@ -22,8 +31,11 @@ namespace vkmr {
 template <typename T>
 class Slice {
 public:
+    friend class Slices<T>;
+
     typedef T value_type;
     typedef size_t size_type;
+    typedef uint32_t number_type;
 
     Slice(void) { Reset( ); }
     Slice(Slice&& slice):
@@ -34,7 +46,8 @@ public:
         m_sliced( slice.m_sliced ),
         m_reserved( slice.m_reserved ),
         m_capacity( slice.m_capacity ),
-        m_alignedCount( slice.m_alignedCount ) {
+        m_alignedCount( slice.m_alignedCount ),
+        m_number( slice.m_number ) {
 
         slice.Reset( );
     }
@@ -55,6 +68,7 @@ public:
             m_reserved = slice.m_reserved;
             m_capacity = slice.m_capacity;
             m_alignedCount = slice.m_alignedCount;
+            m_number = slice.m_number;
 
             slice.Reset( );
         }
@@ -80,9 +94,19 @@ public:
         return m_alignedCount;
     }
 
+    // Returns the slice number
+    number_type Number(void) const {
+        return m_number;
+    }
+
+    // Returns the number of available slots in the slice
+    inline size_type Available(void) const {
+        return m_capacity - (m_sliced + m_reserved);
+    }
+
     // Reserves a  given number of, er, slot(s) (?) within the slice
     bool Reserve(size_type count = 1U) {
-        if ((m_capacity - (m_sliced + m_reserved)) > count){
+        if (Available( ) > count){
             m_reserved += count;
             return true;
         }
@@ -133,7 +157,7 @@ public:
                 vkBuffer = VK_NULL_HANDLE;
             }
             if (vkResult == VK_SUCCESS){
-                slice = Slice( m_vkDevice, vkBuffer, VK_NULL_HANDLE, vkBufferCreateInfo.size );
+                slice = Slice( m_number, m_vkDevice, vkBuffer, VK_NULL_HANDLE, vkBufferCreateInfo.size );
 
                 // Update our own internal state
                 m_sliced += m_reserved;
@@ -154,13 +178,123 @@ public:
         return vkDescriptorBufferInfo;
     }
 
+private:
+    Slice(number_type number, VkDevice vkDevice, VkBuffer vkBuffer, VkDeviceMemory vkDeviceMemory, VkDeviceSize vkSize):
+        m_vkDevice( vkDevice ),
+        m_vkBuffer( vkBuffer ),
+        m_vkDeviceMemory( vkDeviceMemory ),
+        m_vkSize( vkSize ),
+        m_sliced( 0U ),
+        m_reserved( 0U ),
+        m_capacity( vkSize / sizeof( T ) ),
+        m_number( number ) {
+
+        // Calcalate the number of elements needed for the slice to be correctly
+        // aligned at both ends
+        VkMemoryRequirements vkMemoryRequirements = {};
+        ::vkGetBufferMemoryRequirements( m_vkDevice, m_vkBuffer, &vkMemoryRequirements );
+        if (vkMemoryRequirements.alignment == 0){
+            m_alignedCount = 1;
+        }else{
+            m_alignedCount = lowest_common_multiple( sizeof( T ), vkMemoryRequirements.alignment ) / sizeof( T );
+        }
+    }
+
+    void Reset(void) {
+
+        m_vkDevice = VK_NULL_HANDLE;
+        m_vkBuffer = VK_NULL_HANDLE;
+        m_vkDeviceMemory = VK_NULL_HANDLE;
+        m_vkSize = 0U;
+        m_sliced = m_reserved = m_capacity = m_alignedCount = 0U;
+        m_number = 0U;
+    }
+
+    void Release(void) {
+
+        if (m_vkBuffer != VK_NULL_HANDLE){
+            ::vkDestroyBuffer( m_vkDevice, m_vkBuffer, VK_NULL_HANDLE );
+        }
+        if (m_vkDeviceMemory != VK_NULL_HANDLE){
+            ::std::cout << "Deallocating slice memory.." << ::std::endl;
+            ::vkFreeMemory( m_vkDevice, m_vkDeviceMemory, VK_NULL_HANDLE );
+        }
+        Reset( );
+    }
+
+    VkDevice m_vkDevice;
+    VkBuffer m_vkBuffer;
+    VkDeviceMemory m_vkDeviceMemory;
+    VkDeviceSize m_vkSize;
+    size_type m_sliced, m_reserved, m_capacity, m_alignedCount;
+    number_type m_number;
+
+    static const VkBufferUsageFlags c_vkBufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+};
+
+template <typename T>
+class Slices {
+public:
+    typedef Slice<T> slice_type;
+    typedef typename slice_type::number_type index_type;
+
+    Slices(): m_current( 0U ) { }
+    Slices(Slices const&) = delete;
+    Slices(Slices&& slices):
+        m_current( slices.m_current ),
+        m_container( ::std::move( slices.m_container ) ),
+        m_empty( ::std::move( slices.m_empty ) ) {
+
+        slices.Reset( );
+    }
+
+    Slices& operator=(Slices const&) = delete;
+    Slices& operator=(Slices&& slices) {
+
+        if (this != &slices){
+            m_container.clear( );
+
+            m_current = 0U;
+            m_container = ::std::move( slices.m_container );
+            m_empty = ::std::move( slices.m_empty );
+
+            slices.Reset( );
+        }
+        return (*this);
+    }
+
+    // Returns a reference to the currently-active slice,
+    // or an empty slice if none
+    slice_type& Current(void) {
+
+        const auto found = m_container.find( m_current );
+        if (found == m_container.cend( )){
+            return m_empty;
+        }
+        return found->second;
+    }
+
+    // Removes and returns the slice with the given number,
+    // or an empty slice if none
+    slice_type Remove(index_type index) {
+
+        const auto found = m_container.find( m_current );
+        if (found == m_container.cend( )){
+            return slice_type( );
+        }
+
+        auto slice = ::std::move( found->second );
+        m_container.erase( found );
+        return slice;
+    }
+
     // Allocates and returns a new slice of on-device memory from the
     // given device (GPU) which can hold some whole number of elements
     // not smaller than a given minimum
-    static Slice New(ComputeDevice& device, VkDeviceSize vkMinSize) {
+    slice_type& New(ComputeDevice& device, VkDeviceSize vkMinSize) {
 
         // Be pessimistic - start w/an empty slice
-        Slice slice;
+        slice_type slice;
 
         // Query for the maximum number of concurrent invocations
         // and the per-device allocation limit
@@ -232,7 +366,7 @@ public:
             VkBufferCreateInfo vkBufferCreateInfo = {};
             vkBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
             vkBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            vkBufferCreateInfo.usage = c_vkBufferUsageFlags;
+            vkBufferCreateInfo.usage = slice_type::c_vkBufferUsageFlags;
             vkBufferCreateInfo.size = vkSliceSize;
             VkResult vkResult = ::vkCreateBuffer(
                 vkDevice,
@@ -248,67 +382,30 @@ public:
             }
             if (vkResult == VK_SUCCESS){
                 // Bingo
-                slice = Slice( vkDevice, vkBuffer, vkDeviceMemory, vkSliceSize );
-            }else{
-                // Bail
-                device.Free( vkDeviceMemory );
+                const auto number = ++m_current; 
+                auto emplaced = m_container.emplace(
+                    number,
+                    slice_type( number, vkDevice, vkBuffer, vkDeviceMemory, vkSliceSize )
+                );
+                if (emplaced.second){
+                    return (emplaced.first)->second;
+                }
             }
-
-            // Can stop here, regardless?
+            device.Free( vkDeviceMemory );
             break;
         } while (vkSliceSize >= vkMinSize);
-        return slice;
+        return m_empty;
     }
 
 private:
-    Slice(VkDevice vkDevice, VkBuffer vkBuffer, VkDeviceMemory vkDeviceMemory, VkDeviceSize vkSize):
-        m_vkDevice( vkDevice ),
-        m_vkBuffer( vkBuffer ),
-        m_vkDeviceMemory( vkDeviceMemory ),
-        m_vkSize( vkSize ),
-        m_sliced( 0U ),
-        m_reserved( 0U ),
-        m_capacity( vkSize / sizeof( T ) ) {
-
-        // Calcalate the number of elements needed for the slice to be correctly
-        // aligned at both ends
-        VkMemoryRequirements vkMemoryRequirements = {};
-        ::vkGetBufferMemoryRequirements( m_vkDevice, m_vkBuffer, &vkMemoryRequirements );
-        if (vkMemoryRequirements.alignment == 0){
-            m_alignedCount = 1;
-        }else{
-            m_alignedCount = lowest_common_multiple( sizeof( T ), vkMemoryRequirements.alignment ) / sizeof( T );
-        }
-    }
-
     void Reset(void) {
-
-        m_vkDevice = VK_NULL_HANDLE;
-        m_vkBuffer = VK_NULL_HANDLE;
-        m_vkDeviceMemory = VK_NULL_HANDLE;
-        m_vkSize = 0U;
-        m_sliced = m_reserved = m_capacity = m_alignedCount = 0U;
+        m_current = 0U;
+        m_container.clear( );
     }
 
-    void Release(void) {
-
-        if (m_vkBuffer != VK_NULL_HANDLE){
-            ::vkDestroyBuffer( m_vkDevice, m_vkBuffer, VK_NULL_HANDLE );
-        }
-        if (m_vkDeviceMemory != VK_NULL_HANDLE){
-            ::std::cout << "Deallocating slice memory.." << ::std::endl;
-            ::vkFreeMemory( m_vkDevice, m_vkDeviceMemory, VK_NULL_HANDLE );
-        }
-        Reset( );
-    }
-
-    VkDevice m_vkDevice;
-    VkBuffer m_vkBuffer;
-    VkDeviceMemory m_vkDeviceMemory;
-    VkDeviceSize m_vkSize;
-    size_type m_sliced, m_reserved, m_capacity, m_alignedCount;
-
-    static const VkBufferUsageFlags c_vkBufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    index_type m_current;
+    ::std::unordered_map<index_type, slice_type> m_container;
+    slice_type m_empty;
 };
 
 } // namespace vkmr
