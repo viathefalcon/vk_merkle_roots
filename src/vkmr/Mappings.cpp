@@ -37,7 +37,7 @@ struct alignas(uint) MappingPushConstants {
 class Mapping {
 public:
     Mapping(Mapping&&);
-    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, Batch&&, Slice<VkSha256Result>&&, uint32_t);
+    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, Batch&&, Mappings::slice_type&&, uint32_t);
     Mapping(Mapping const&) = delete;
 
     Mapping(void) { Reset( ); }
@@ -51,6 +51,10 @@ public:
 
     VkResult Dispatch(VkQueue, vkmr::Pipeline&);
 
+    Mappings::slice_type&& MoveSlice(void) {
+        return ::std::move( m_slice );
+    }    
+
 private:
     void Reset(void);
     void Release(void);
@@ -62,7 +66,7 @@ private:
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
     Batch m_batch;
-    Slice<VkSha256Result> m_slice;
+    Mappings::slice_type m_slice;
 
     uint32_t m_maxComputeWorkGroupCount;
 };
@@ -80,7 +84,7 @@ Mapping::Mapping(Mapping&& mapping):
     mapping.Reset( );
 }
 
-Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, Batch&& batch, Slice<VkSha256Result>&& slice, uint32_t maxComputeWorkGroupCount):
+Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, Batch&& batch, Mappings::slice_type&& slice, uint32_t maxComputeWorkGroupCount):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
@@ -253,7 +257,7 @@ public:
 
     VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue);
 
-    void Update(void);
+    ::std::vector<slice_type> Update(void);
 
     void WaitFor(void);
 
@@ -293,19 +297,25 @@ VkResult MappingsImpl::Map(Batch&& batch, Slice<VkSha256Result>&& slice, VkQueue
     return VK_ERROR_OUT_OF_POOL_MEMORY;
 }
 
-void MappingsImpl::Update(void) {
+::std::vector<Mappings::slice_type> MappingsImpl::Update(void) {
 
-    for (auto it = m_container.cbegin( ); it != m_container.cend( ); ) {
+    ::std::vector<Mappings::slice_type> slices;
+    for (auto it = m_container.begin( ); it != m_container.end( ); ) {
         // Get the current status
         auto status = ::vkGetFenceStatus( m_vkDevice, static_cast<VkFence>( *it ) );
         if (status == VK_SUCCESS){
-            // Retire the mapping by removing from hte
+            // Retire the mapping by removing from the vector
+            auto mapping = ::std::move( *it );
             it = m_container.erase( it );
+
+            // Accumulate the slice
+            slices.push_back( ::std::move( mapping.MoveSlice( ) ) );
         }else{
             // Check again later; for now, just advance
             ++it;
         }
     }
+    return slices;
 }
 
 void MappingsImpl::WaitFor(void) {

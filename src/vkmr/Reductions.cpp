@@ -26,6 +26,8 @@ extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
+using ::std::vector;
+
 // Types
 //
 
@@ -44,6 +46,10 @@ public:
 
     operator VkResult() const { return m_vkResult; }
     operator VkFence() const { return m_vkFence; }
+
+    Reductions::slice_type::number_type Number(void) const {
+        return m_slice.Number( );
+    }
 
     VkSha256Result Read(void);
     VkResult Apply(Reductions::slice_type&&, ComputeDevice&, const vkmr::Pipeline&);
@@ -527,7 +533,11 @@ public:
         m_pipeline = vkmr::Pipeline( );
     }
 
-    VkSha256Result Reduce(Reductions::slice_type&&, ComputeDevice&);
+    VkResult Reduce(Reductions::slice_type&&, ComputeDevice&);
+
+    void Update(void);
+
+    VkSha256Result WaitFor(void);
 
 private:
     VkDevice m_vkDevice;
@@ -537,31 +547,71 @@ private:
     vkmr::Pipeline m_pipeline;
 
     ReductionFactory m_factory;
-    ::std::vector<ReductionFactory::ProductType> m_container;
-    //::std::unordered_map<slice_type::number_type, VkSha256Result> results;
+    vector<ReductionFactory::ProductType> m_container;
+    ::std::unordered_map<slice_type::number_type, VkSha256Result> m_results;
 };
 
-VkSha256Result ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDevice& device) {
+VkResult ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDevice& device) {
 
-    VkSha256Result vkSha256Result = {};
-
-    // Allocate a new reduction
+    // Allocate and apply a new reduction
     auto reduction = m_factory.CreateReduction(
         m_vkDevice,
         m_descriptorPool.AllocateDescriptorSet( m_pipeline ),
         m_commandPool.AllocateCommandBuffer( )
     );
-
-    // Apply it
     auto vkResult = reduction->Apply( ::std::move( slice ), device, m_pipeline );
     if (vkResult == VK_SUCCESS){
-        // Wait for it complete
-        ::std::vector<VkFence> fences;
-        fences.push_back( *reduction );
-        ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
+        // Accumulate it
+        m_container.push_back( ::std::move( reduction ) );
+    }
+    return vkResult;
+}
 
-        // Read back the result
-        vkSha256Result = reduction->Read( );
+void ReductionsImpl::Update(void) {
+
+    for (auto it = m_container.begin( ), end = m_container.end( ); it != end; ++it) {
+        auto reduction = (*it);
+        auto vkResult = ::vkGetFenceStatus( m_vkDevice, *reduction );
+        if (vkResult == VK_SUCCESS){
+            // Done-zo..
+            m_results.emplace(
+                reduction->Number( ),
+                reduction->Read( )
+            );
+            it = m_container.erase( it );
+        }
+    }
+}
+
+VkSha256Result ReductionsImpl::WaitFor(void) {
+
+    // Look for an early out
+    VkSha256Result vkSha256Result = {};
+    if (m_container.empty( )){
+        return vkSha256Result;
+    }
+
+    // Wait on all of the fences
+    vector<VkFence> fences;
+    for (auto it = m_container.cbegin( ), end = m_container.cend( ); it != end; ++it) {
+        auto reduction = (*it);
+        fences.push_back( *reduction );
+    }
+    ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
+
+    // Update to get out the results
+    this->Update( );
+
+    // Return
+    switch (m_results.size( )){
+        case 1:
+            // Special case..
+            vkSha256Result = m_results.begin( )->second;
+            break;
+
+        default:
+            // TODO..
+            break;
     }
     return vkSha256Result;
 }

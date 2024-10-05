@@ -46,12 +46,13 @@ public:
         m_sliced( slice.m_sliced ),
         m_reserved( slice.m_reserved ),
         m_capacity( slice.m_capacity ),
+        m_filled( slice.m_filled ),
         m_alignedCount( slice.m_alignedCount ),
         m_number( slice.m_number ) {
 
         slice.Reset( );
     }
-    Slice(Slice&) = delete;
+    Slice(Slice const&) = delete;
 
     ~Slice(void) { Release( ); }
 
@@ -67,6 +68,7 @@ public:
             m_sliced = slice.m_sliced;
             m_reserved = slice.m_reserved;
             m_capacity = slice.m_capacity;
+            m_filled = slice.m_filled;
             m_alignedCount = slice.m_alignedCount;
             m_number = slice.m_number;
 
@@ -77,6 +79,17 @@ public:
 
     Slice& operator=(Slice const&) = delete;
     operator bool() const { return (m_vkDeviceMemory != VK_NULL_HANDLE); }
+
+    Slice& operator+=(Slice&& sub) {
+        if (sub.Number( ) == Number( )){
+            m_filled += sub.m_vkSize / sizeof( T );
+        }
+        return (*this);
+    }
+
+    bool IsFilled(void) const {
+        return m_filled == m_capacity;
+    }
 
     // Returns the underlying buffer
     VkBuffer Buffer(void) const {
@@ -125,7 +138,7 @@ public:
 
     // Gets the sub slice encompassing the reservations since the last 
     // sub slice, if any
-    Slice Get(void) {
+    Slice Sub(void) {
 
         // Start with an empty slice
         Slice slice;
@@ -206,7 +219,7 @@ private:
         m_vkBuffer = VK_NULL_HANDLE;
         m_vkDeviceMemory = VK_NULL_HANDLE;
         m_vkSize = 0U;
-        m_sliced = m_reserved = m_capacity = m_alignedCount = 0U;
+        m_sliced = m_reserved = m_capacity = m_filled = m_alignedCount = 0U;
         m_number = 0U;
     }
 
@@ -216,7 +229,7 @@ private:
             ::vkDestroyBuffer( m_vkDevice, m_vkBuffer, VK_NULL_HANDLE );
         }
         if (m_vkDeviceMemory != VK_NULL_HANDLE){
-            ::std::cout << "Deallocating slice memory.." << ::std::endl;
+            ::std::cout << "Deallocating memory for slice " << this->Number( ) << ".." << ::std::endl;
             ::vkFreeMemory( m_vkDevice, m_vkDeviceMemory, VK_NULL_HANDLE );
         }
         Reset( );
@@ -226,7 +239,7 @@ private:
     VkBuffer m_vkBuffer;
     VkDeviceMemory m_vkDeviceMemory;
     VkDeviceSize m_vkSize;
-    size_type m_sliced, m_reserved, m_capacity, m_alignedCount;
+    size_type m_sliced, m_reserved, m_capacity, m_filled, m_alignedCount;
     number_type m_number;
 
     static const VkBufferUsageFlags c_vkBufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -238,11 +251,11 @@ public:
     typedef Slice<T> slice_type;
     typedef typename slice_type::number_type index_type;
 
-    Slices(VkDeviceSize vkSliceSize): m_vkSliceSize( vkSliceSize ), m_current( 0U ) { }
+    Slices(VkDeviceSize vkSliceSize): m_vkPreferredSliceSize( vkSliceSize ), m_current( 0U ) { }
     Slices(): Slices( 0U ) { }
     Slices(Slices const&) = delete;
     Slices(Slices&& slices):
-        m_vkSliceSize( slices.m_vkSliceSize ),
+        m_vkPreferredSliceSize( slices.m_vkPreferredSliceSize ),
         m_current( slices.m_current ),
         m_container( ::std::move( slices.m_container ) ),
         m_empty( ::std::move( slices.m_empty ) ) {
@@ -256,7 +269,7 @@ public:
         if (this != &slices){
             m_container.clear( );
 
-            m_vkSliceSize = slices.m_vkSliceSize;
+            m_vkPreferredSliceSize = slices.m_vkPreferredSliceSize;
             m_current = slices.m_current;
             m_container = ::std::move( slices.m_container );
             m_empty = ::std::move( slices.m_empty );
@@ -266,16 +279,17 @@ public:
         return (*this);
     }
 
-    // Returns a reference to the currently-active slice,
-    // or an empty slice if none
-    slice_type& Current(void) {
-
-        const auto found = m_container.find( m_current );
+    slice_type& operator[](index_type index) {
+        const auto found = m_container.find( index );
         if (found == m_container.cend( )){
             return m_empty;
         }
         return found->second;
     }
+
+    // Returns a reference to the currently-active slice,
+    // or an empty slice if none
+    slice_type& Current(void) { return (*this)[m_current]; }
 
     // Removes and returns the slice with the given number,
     // or an empty slice if none
@@ -297,39 +311,12 @@ public:
     slice_type& New(ComputeDevice& device) {
 
         // Look for an early out
-        if (m_vkSliceSize == 0U){
+        if (m_vkPreferredSliceSize == 0U){
             return m_empty;
         }
 
-        // Query for the maximum number of concurrent invocations
-        // and the per-device allocation limit
-        VkPhysicalDeviceMaintenance3PropertiesKHR vkPhysicalDeviceMaintenance3Properties = {};
-        vkPhysicalDeviceMaintenance3Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
-        VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
-        vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-        vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceMaintenance3Properties;
-        device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
-
-        // We want the smaller of: 
-        // * the largest slice we can reduce in one pass
-        // * the maximum the system (says it) will let us allocate.
-        // * the maximum buffer range
-        const VkPhysicalDeviceProperties& vkPhysicalDeviceProperties = vkPhysicalDeviceProperties2.properties;
-        VkDeviceSize vkSliceSize = sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
-        if (vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize > 0U){
-            vkSliceSize = ::std::min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
-        }
-        if (vkPhysicalDeviceProperties.limits.maxStorageBufferRange > 0U){
-            vkSliceSize = ::std::min(
-                vkSliceSize,
-                static_cast<decltype( vkSliceSize )>( vkPhysicalDeviceProperties.limits.maxStorageBufferRange )
-            );
-        }
-
-        // Cap to the size needed to hold the largest possible
-        // number of elements which is a power of 2
-        const auto count = largest_pow2_le( vkSliceSize / sizeof( T ) );
-        vkSliceSize = count * sizeof( T );
+        // Get the target slice size
+        auto vkSliceSize = this->SliceSize( device );
 
         // Loop until we've maybe allocated _something_
         VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
@@ -398,7 +385,7 @@ public:
             }
             device.Free( vkDeviceMemory );
             break;
-        } while (vkSliceSize >= m_vkSliceSize);
+        } while (vkSliceSize > 1U);
         return m_empty;
     }
 
@@ -407,7 +394,7 @@ public:
     index_type MaxSliceCount(const ComputeDevice& device) const {
 
         // Get the memory budgets for compatible memory types
-        const auto dataRequirements = device.StorageBufferRequirements( m_vkSliceSize );
+        const auto dataRequirements = device.StorageBufferRequirements( m_vkPreferredSliceSize );
         const auto deviceMemoryBudgets = device.AvailableMemoryTypes(
             dataRequirements,
             c_vkMemoryPropertyFlags
@@ -430,25 +417,61 @@ public:
         // Now iterate the heaps and sum up
         index_type result = 0U;
         for (auto it = heaped.cbegin( ), end = heaped.cend( ); it != end; ++it){
-            const auto count = static_cast<uint32_t>( it->second / m_vkSliceSize );
+            const auto count = static_cast<uint32_t>( it->second / m_vkPreferredSliceSize );
             result += count;
         }
         return result;
-    } 
+    }
+
+    // Calculates the actual size of a slice on the given compute device
+    VkDeviceSize SliceSize(const ComputeDevice& device) const {
+
+        // Query for the maximum number of concurrent invocations
+        // and the per-device allocation limit
+        VkPhysicalDeviceMaintenance3PropertiesKHR vkPhysicalDeviceMaintenance3Properties = {};
+        vkPhysicalDeviceMaintenance3Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
+        VkPhysicalDeviceProperties2KHR vkPhysicalDeviceProperties2 = {};
+        vkPhysicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        vkPhysicalDeviceProperties2.pNext = &vkPhysicalDeviceMaintenance3Properties;
+        device.GetPhysicalDeviceProperties2KHR( &vkPhysicalDeviceProperties2 );
+
+        // We want the smaller of: 
+        // * the largest slice we can reduce in one pass
+        // * the maximum the system (says it) will let us allocate.
+        // * the maximum buffer range
+        // * the preferred slice size
+        const VkPhysicalDeviceProperties& vkPhysicalDeviceProperties = vkPhysicalDeviceProperties2.properties;
+        VkDeviceSize vkSliceSize = sizeof( T ) * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupSize[0] * vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0];
+        if (vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize > 0U){
+            vkSliceSize = ::std::min( vkSliceSize, vkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize );
+        }
+        if (vkPhysicalDeviceProperties.limits.maxStorageBufferRange > 0U){
+            vkSliceSize = ::std::min(
+                vkSliceSize,
+                static_cast<decltype( vkSliceSize )>( vkPhysicalDeviceProperties.limits.maxStorageBufferRange )
+            );
+        }
+        vkSliceSize = ::std::min( vkSliceSize, m_vkPreferredSliceSize );
+
+        // Cap to the size needed to hold the largest possible
+        // number of elements which is a power of 2
+        const auto count = largest_pow2_le( vkSliceSize / sizeof( T ) );
+        return count * sizeof( T );
+    }
+
 private:
     void Reset(void) {
-        m_vkSliceSize = 0U;
+        m_vkPreferredSliceSize = 0U;
         m_current = 0U;
         m_container.clear( );
     }
 
-    VkDeviceSize m_vkSliceSize;
+    VkDeviceSize m_vkPreferredSliceSize;
     index_type m_current;
     ::std::unordered_map<index_type, slice_type> m_container;
     slice_type m_empty;
 
     static const VkMemoryPropertyFlags c_vkMemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
 };
 
 } // namespace vkmr

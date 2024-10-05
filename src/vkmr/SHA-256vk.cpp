@@ -291,26 +291,45 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     this->Flush( );
 
     // If the current batch is not empty, then send it off for mapping
+    // And then wait for all such mappings to finish
     auto& current = m_slices.Current( );
     if (!m_batch.Empty( )){
-        m_mappings->Map( ::std::move( m_batch ), current.Get( ), m_device.Queue( ) );
+        m_mappings->Map( ::std::move( m_batch ), current.Sub( ), m_device.Queue( ) );
     }
-
-    // Wait for all mappings to finish
     m_mappings->WaitFor( );
 
-    // Apply the reduction
-    auto vkSha256Result = m_reductions->Reduce(
+    // Apply the reduction of the last slice and wait for all to finish
+    m_reductions->Reduce(
         m_slices.Remove( current.Number( ) ),
         m_device
     );
+    auto vkSha256Result = m_reductions->WaitFor( );
     return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
 bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
 
     // Update the state of any in-flight mappings
-    m_mappings->Update( );
+    auto mapped = m_mappings->Update( );
+    while (!mapped.empty( )){
+        auto sub = ::std::move( mapped.back( ) );
+        mapped.pop_back( );
+
+        const auto number = sub.Number( );
+        auto& slice = m_slices[number];
+        slice += ::std::move( sub );
+        if (slice.IsFilled( )){
+            // Kick off a new reduction
+            m_reductions->Reduce( m_slices.Remove( number ), m_device );
+
+            // Allocate a new slice
+            auto& next = m_slices.New( m_device );
+            if (!next){
+                // Probably out of memory, so stop here
+                return false;
+            }
+        }
+    }
 
     // Add to the buffer, and check it if can be flushed
     m_buffer.push_back( arg );
@@ -352,7 +371,7 @@ bool VkSha256D::Instance::Flush(void) {
     // If we get here, then the batch may be full,
     // in which case, immediately send it off for mapping..
     if (m_batch){
-        m_mappings->Map( ::std::move( m_batch ), slice.Get( ), m_device.Queue( ) );
+        m_mappings->Map( ::std::move( m_batch ), slice.Sub( ), m_device.Queue( ) );
     }
 
     // And, try again with a new batch

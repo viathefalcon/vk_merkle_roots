@@ -21,12 +21,14 @@ namespace vkmr {
 // Encapsulates mappings of input batches to a slices of device memory
 class Mappings {
 public:
+    typedef Slice<VkSha256Result> slice_type;
+
     virtual ~Mappings(void) = default;
 
-    virtual VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue) = 0;
+    virtual VkResult Map(Batch&&, slice_type&&, VkQueue) = 0;
 
     // Updates the status of in-flight mappings
-    virtual void Update(void) = 0;
+    virtual ::std::vector<slice_type> Update(void) = 0;
 
     // Synchronously waits for all in-flight mappings to complete
     virtual void WaitFor(void) = 0;
@@ -42,7 +44,13 @@ public:
     virtual ~Reductions(void) = default;
 
     // Initiates a new reduction of the given slice of on-device memory
-    virtual VkSha256Result Reduce(slice_type&&, ComputeDevice&) = 0;
+    virtual VkResult Reduce(slice_type&&, ComputeDevice&) = 0;
+
+    // Updates the status of in-progress reductions
+    virtual void Update(void) = 0;
+
+    // Synchronously waits for all reductions to conclude
+    virtual VkSha256Result WaitFor(void) = 0;
 
     static ::std::unique_ptr<Reductions> New(ComputeDevice&, typename slice_type::number_type);
 };
