@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 // Local Project Headers
+#include "ISha256D.h"
 #include "Ops.h"
 
 namespace vkmr {
@@ -19,21 +20,12 @@ namespace vkmr {
 // Class(es)
 //
 
-class IVkSha256DInstance {
+class IVkSha256DInstance : public ISha256D {
 public:
-    typedef ::std::string arg_type;
-    typedef ::std::string out_type;
-    typedef ::std::string name_type;
-
-    IVkSha256DInstance(const name_type& name): m_name( name ) { }
+    IVkSha256DInstance(const ISha256D::name_type& name): ISha256D( name ) { }
     virtual ~IVkSha256DInstance() = default;
 
-    virtual out_type Root(void) = 0;
-    virtual bool Add(const arg_type&) = 0;
-    const name_type& Name(void) const { return m_name; }
-
-protected:
-    name_type m_name;
+    bool Reset(void) { return false; }
 };
 
 class VkSha256D {
@@ -46,11 +38,11 @@ public:
     operator bool() const;
     operator VkResult() const { return m_vkResult; }
 
-    bool Has(const IVkSha256DInstance::name_type&) const;
+    bool Has(const ISha256D::name_type&) const;
 
-    Instance Get(const IVkSha256DInstance::name_type&);
+    Instance Get(const ISha256D::name_type&);
 
-    ::std::vector<IVkSha256DInstance::name_type> Available(void) const;
+    ::std::vector<ISha256D::name_type> Available(void) const;
 
 private:
     VkResult m_vkResult;
@@ -72,9 +64,9 @@ public:
     Instance& operator=(const Instance&) = delete;
     Instance& operator=(Instance&&);
 
-    out_type Root(void);
+    ISha256D::out_type Root(void);
 
-    bool Add(const arg_type&);
+    bool Add(const ISha256D::arg_type&);
 
 private:
     // Flushes the contents of the buffer into

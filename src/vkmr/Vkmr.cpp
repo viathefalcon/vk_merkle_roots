@@ -77,7 +77,7 @@ int main(int argc, const char* argv[]) {
             break;
         }
 
-        if (!mrc.Add( std::move( arg ) )){
+        if (!mrc.Add( arg )){
             std::cerr << "Failed to accumulate \"" << arg << "\"" << std::endl;
             break;
         }

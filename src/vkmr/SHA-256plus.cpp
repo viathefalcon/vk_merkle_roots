@@ -488,7 +488,7 @@ namespace vkmr {
 // Classes
 //
 
-CpuSha256D::out_type CpuSha256D::Root(void) const {
+ISha256D::out_type CpuSha256D::Root(void) {
 
 	// Look for an early out
 	if (m_args.empty( )){

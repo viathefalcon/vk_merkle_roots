@@ -216,21 +216,21 @@ VkSha256D::operator bool() const {
     return !m_devices.empty( );
 }
 
-bool VkSha256D::Has(const IVkSha256DInstance::name_type& name) const {
+bool VkSha256D::Has(const ISha256D::name_type& name) const {
     const auto found = m_devices.find( name );
     return (found != m_devices.end( ));
 }
 
-VkSha256D::Instance VkSha256D::Get(const IVkSha256DInstance::name_type& name) {
+VkSha256D::Instance VkSha256D::Get(const ISha256D::name_type& name) {
     const auto found = m_devices.find( name );
     auto instance = VkSha256D::Instance( found->first, ::std::move( found->second ) );
     m_devices.erase( found );
     return instance;
 }
 
-::std::vector<IVkSha256DInstance::name_type> VkSha256D::Available(void) const {
+::std::vector<ISha256D::name_type> VkSha256D::Available(void) const {
 
-    ::std::vector<IVkSha256DInstance::name_type> names;
+    ::std::vector<ISha256D::name_type> names;
     ::std::for_each(
         m_devices.cbegin( ),
         m_devices.cend( ),
@@ -285,7 +285,7 @@ VkSha256D::Instance& VkSha256D::Instance::operator=(VkSha256D::Instance&& instan
     return (*this);
 }
 
-VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
+ISha256D::out_type VkSha256D::Instance::Root(void) {
 
     // Flush the buffer
     this->Flush( );
@@ -307,7 +307,7 @@ VkSha256D::Instance::out_type VkSha256D::Instance::Root(void) {
     return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
 }
 
-bool VkSha256D::Instance::Add(const VkSha256D::Instance::arg_type& arg) {
+bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
 
     // Update the state of any in-flight mappings
     auto mapped = m_mappings->Update( );
