@@ -29,7 +29,7 @@ namespace vkmr {
 
 class CpuSha256D : public ISha256D {
 public:
-    CpuSha256D(): ISha256D("Single-threaded CPU implementation") { }
+    CpuSha256D(): ISha256D("CPU") { }
 
     out_type Root(void);
 

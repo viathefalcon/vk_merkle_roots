@@ -562,7 +562,8 @@ ISha256D::out_type CpuSha256D::Root(void) {
 	debug_print_bytes( be_to_string( pin->front( ) ) );
 	*/
 
-	return hash_to_string( pin->front( ) );
+	auto root = hash_to_string( pin->front( ) );
+	return print_bytes( root ).str( );
 }
 
 } // namespace vkmr
