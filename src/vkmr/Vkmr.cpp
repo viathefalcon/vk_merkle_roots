@@ -33,6 +33,8 @@ int run(vkmr::ISha256D& sha256D) {
     // Loop over the inputs
     vkmr::Input input( stdin );
     size_t size = 0U, count = 0U;
+    StopWatch sw;
+    sw.Start( );
     while (input.Has( )){
         const auto arg = input.Get( );
         if (arg.empty( )){
@@ -48,10 +50,9 @@ int run(vkmr::ISha256D& sha256D) {
         count++;
     }
     if (count > 0U){
-        StopWatch sw;
-        sw.Start( );
         const auto root = sha256D.Root( );
-        cout << sha256D.Name( ) << ": computed root (of " << count << " item(s), " << size << " byte(s)) => " << root << " in " << sw.Elapsed( ) << endl;
+        const auto elapsed = sw.Elapsed( );
+        cout << sha256D.Name( ) << ": computed root (of " << count << " item(s), " << size << " byte(s)) => " << root << " in " << elapsed << endl;
     }
     return 0;
 }

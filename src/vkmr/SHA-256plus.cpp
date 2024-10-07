@@ -491,7 +491,7 @@ namespace vkmr {
 ISha256D::out_type CpuSha256D::Root(void) {
 
 	// Look for an early out
-	if (m_args.empty( )){
+	if (m_leaves.empty( )){
 		return "";
 	}
 
@@ -507,22 +507,11 @@ ISha256D::out_type CpuSha256D::Root(void) {
 		return result;
 	};
 
-	::std::vector<::std::vector<uint32_t>> u, v;
-	u.reserve( m_args.size( ) );
-	::std::for_each( m_args.cbegin( ), m_args.cend( ), [&u, &be_to_string](const ::std::string& arg) {
-		const auto H = cpu_sha256d_int( arg );
-
-		/*
-		debug_print_label( "cpu_sha256d_be: " );
-		debug_print_bytes( be_to_string( H ) );
-		*/
-
-		u.push_back( H );
-	} );
-	v.reserve( u.size( ) );
+	::std::vector<::std::vector<uint32_t>> v;
+	v.reserve( m_leaves.size( ) );
 
 	// Loop until we've reduced to a single element
-	auto pin = &u, pout = &v;
+	auto pin = &m_leaves, pout = &v;
 	do {
 		// Get the number of pairs of elements in the current run
 		const auto count = pin->size( );
@@ -564,6 +553,11 @@ ISha256D::out_type CpuSha256D::Root(void) {
 
 	auto root = hash_to_string( pin->front( ) );
 	return print_bytes( root ).str( );
+}
+
+bool CpuSha256D::Add(const ISha256D::arg_type& arg) {
+	m_leaves.push_back( cpu_sha256d_int( arg ) );
+	return true;
 }
 
 } // namespace vkmr

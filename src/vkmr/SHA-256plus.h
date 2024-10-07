@@ -31,20 +31,19 @@ class CpuSha256D : public ISha256D {
 public:
     CpuSha256D(): ISha256D("CPU") { }
 
-    out_type Root(void);
+    ISha256D::out_type Root(void);
 
-    bool Add(const ISha256D::arg_type& arg) {
-        m_args.push_back( arg );
-        return true;
-    }
+    bool Add(const ISha256D::arg_type& arg);
 
     bool Reset(void) {
-        m_args.clear( );
+        m_leaves.clear( );
         return true;
     }
 
-private:
-    ::std::vector<arg_type> m_args;
+protected:
+    typedef ::std::vector<uint32_t> node_type;
+
+    ::std::vector<node_type> m_leaves;
 };
 
 } // namespace vkmr
