@@ -17,6 +17,7 @@
 // Local Project Headers
 #include "Debug.h"
 #include "Utils.h"
+#include "SHA-256plus.h"
 
 // Externals
 //
@@ -40,6 +41,24 @@ struct alignas(uint) BySubgroupPushConstants {
 
 // Classes
 //
+
+// An extension of the CPU-based implementation for which
+// the input are already hashed
+class CpuSha256DforReductions : public CpuSha256D {
+public:
+    bool Add(const VkSha256Result&);
+};
+
+bool CpuSha256DforReductions::Add(const VkSha256Result& vkSha256Result) {
+
+    CpuSha256D::node_type leaf;
+    for (uint32_t u = 0U; u < SHA256_WC; ++u){
+        leaf.push_back( vkSha256Result.data[u] );
+    }
+    m_leaves.push_back( leaf );
+    return true;
+}
+
 class Reduction {
 public:
     virtual ~Reduction();
@@ -97,12 +116,6 @@ VkSha256Result Reduction::Read(void) {
     if (m_vkResult == VK_SUCCESS){
         const auto pResults = static_cast<uint8_t*>( pMapped );
         ::std::memcpy( &result, pResults, sizeof( VkSha256Result ) );
-
-        // The output is big-endian in nature; convert to little endianess prior to output
-        for (auto u = 0U; u < SHA256_WC; ++u){
-            const uint w = result.data[u];
-            result.data[u] = SWOP_ENDS_U32( w );
-        }
     }
 
     // Cleanup & return
@@ -414,8 +427,16 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
         VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
         ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
-        // Loop until we will have reduced the number of elements to 1
-        for (uint delta = 1U, count = m_count; count > 1U; ){
+        // Sum up the number of required iterations to reduce the number of
+        // elements to 1
+        uint iterations = 0;
+        const auto applicable = m_slice.Number( ) > 1 ? m_slice.Capacity( ) : m_slice.Count( );
+        for (auto count = applicable; count > 1U; ++iterations ){
+            const auto pairs = (((count % 2 == 0) ? count : (count+1)) >> 1);
+            const auto& workgroupSize = pipeline.GetWorkGroupSize( );
+            count = workgroupSize.GetGroupCountX( pairs );
+        }
+        for (uint delta = 1U, count = m_count; iterations > 0; --iterations ){
             const auto pairs = (((count % 2 == 0) ? count : (count+1)) >> 1);
             const auto& workgroupSize = pipeline.GetWorkGroupSize( );
             count = workgroupSize.GetGroupCountX( pairs );
@@ -436,7 +457,7 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
                 ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
 
                 // Actually dispatch the shader invocations
-                ::std::cout << "Dispatching " << x << " subgroup-ed workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
+                ::std::cout << m_slice.Number( ) << ": dispatching " << x << " subgroup-ed workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
                 ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
 
                 // Advance
@@ -445,7 +466,7 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
 
             // Tee up the next iteration
             delta *= (workgroupSize.x << 1); // x2 because each invocation in the group has addressed two items
-            if (count > 1U){
+            if (iterations > 0U){
                 // Inject a barrier between passes
                 VkMemoryBarrier2KHR vkMemoryBarrier = {};
                 vkMemoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
@@ -537,7 +558,7 @@ public:
 
     void Update(void);
 
-    VkSha256Result WaitFor(void);
+    ISha256D::out_type WaitFor(void);
 
 private:
     VkDevice m_vkDevice;
@@ -569,51 +590,69 @@ VkResult ReductionsImpl::Reduce(Reductions::slice_type&& slice, ComputeDevice& d
 
 void ReductionsImpl::Update(void) {
 
-    for (auto it = m_container.begin( ), end = m_container.end( ); it != end; ++it) {
+    for (auto it = m_container.begin( ); it != m_container.end( ); ) {
         auto reduction = (*it);
-        auto vkResult = ::vkGetFenceStatus( m_vkDevice, *reduction );
+        auto vkFence = static_cast<VkFence>( *reduction );
+        auto vkResult = ::vkGetFenceStatus( m_vkDevice, vkFence );
         if (vkResult == VK_SUCCESS){
+            ::std::cout << "Reduction #" << reduction->Number( ) << " finished." << ::std::endl;
             // Done-zo..
             m_results.emplace(
                 reduction->Number( ),
                 reduction->Read( )
             );
             it = m_container.erase( it );
+        }else{
+            ++it;
         }
     }
 }
 
-VkSha256Result ReductionsImpl::WaitFor(void) {
+ISha256D::out_type ReductionsImpl::WaitFor(void) {
 
     // Look for an early out
-    VkSha256Result vkSha256Result = {};
     if (m_container.empty( )){
-        return vkSha256Result;
+        return "";
     }
 
     // Wait on all of the fences
     vector<VkFence> fences;
     for (auto it = m_container.cbegin( ), end = m_container.cend( ); it != end; ++it) {
         auto reduction = (*it);
-        fences.push_back( *reduction );
+        auto vkFence = static_cast<VkFence>( *reduction );
+        fences.push_back( vkFence );
     }
-    ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
+    if (!fences.empty( )){
+        ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
+    }
 
     // Update to get out the results
     this->Update( );
 
     // Return
-    switch (m_results.size( )){
-        case 1:
-            // Special case..
-            vkSha256Result = m_results.begin( )->second;
-            break;
+    if (m_results.size( ) == 1U){
+        auto vkSha256Result = m_results.begin( )->second;
 
-        default:
-            // TODO..
-            break;
+        // The output is big-endian in nature; convert to little endianess prior to output
+        for (auto u = 0U; u < SHA256_WC; ++u){
+            const uint w = vkSha256Result.data[u];
+            vkSha256Result.data[u] = SWOP_ENDS_U32( w );
+        }
+        return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
     }
-    return vkSha256Result;
+
+    CpuSha256DforReductions sha256D;
+    const auto end = m_results.end( );
+    for (slice_type::number_type u = 1U, bound = m_results.size( ); u < bound; ++u ){
+        const auto found = m_results.find( u );
+        if (found == end){
+            // Bail
+            return "";
+        }
+        sha256D.Add( found->second );
+    }
+    return sha256D.Root( );
+    return "";
 }
 
 ::std::unique_ptr<Reductions> Reductions::New(ComputeDevice& device, typename slice_type::number_type number) {

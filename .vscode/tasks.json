@@ -240,8 +240,7 @@
             "group": {
                 "kind": "build",
                 "isDefault": true
-            },
-            "dependsOn":["(OnDeck) Compile Shader for Reduction (Subgroups)"]
+            }
         },
         {
             "type": "shell",

@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/vkmr.app",
-            "args": [],
+            "args": ["AMD Custom GPU 0405 (RADV VANGOGH)"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/bin",
             "environment": [],
