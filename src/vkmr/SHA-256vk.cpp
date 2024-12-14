@@ -20,7 +20,7 @@
 // Constants
 //
 
-static const VkDeviceSize Mega256 = (256 * 1024 * 1024);
+static const VkDeviceSize MegaX = (64 * 1024 * 1024);
 
 // Globals
 //
@@ -28,7 +28,7 @@ static const VkDeviceSize Mega256 = (256 * 1024 * 1024);
 // Vulkan Extension Function Pointers
 PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
-PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+PFN_vkCmdPipelineBarrier2KHR g_pVkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
@@ -89,7 +89,7 @@ VkSha256D::VkSha256D(): m_instance( VK_NULL_HANDLE ) {
         g_pVkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)(
             ::vkGetInstanceProcAddr( m_instance, "vkGetPhysicalDeviceMemoryProperties2" )
         );
-        g_VkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2KHR)(
+        g_pVkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2KHR)(
             ::vkGetInstanceProcAddr( m_instance, "vkCmdPipelineBarrier2KHR" )
         );
 
@@ -244,8 +244,8 @@ VkSha256D::Instance VkSha256D::Get(const ISha256D::name_type& name) {
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
     m_device( ::std::move( device ) ),
-    m_slices( Mega256 ),
-    m_batches( Mega256, (Mega256 / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
+    m_slices( MegaX ),
+    m_batches( MegaX, (MegaX / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
 
     m_slices.New( m_device );
     m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );
@@ -298,19 +298,25 @@ ISha256D::out_type VkSha256D::Instance::Root(void) {
     }
     m_mappings->WaitFor( );
 
-    // Apply the reduction of the last slice and wait for all to finish
-    m_reductions->Reduce(
-        m_slices.Remove( current.Number( ) ),
-        m_device
-    );
-    auto vkSha256Result = m_reductions->WaitFor( );
-    return print_bytes_ex( vkSha256Result.data, SHA256_WC ).str( );
+    // Apply the reduction to all of the slices and wait for all to finish
+    while (m_slices.Has( )){
+        const auto& slice = m_slices.Any( );
+        if (slice){
+            auto number = slice.Number( );
+            m_reductions->Reduce(
+                m_slices.Remove( number ),
+                m_device
+            );
+        }
+    }
+    return m_reductions->WaitFor( );
 }
 
 bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
 
     // Update the state of any in-flight mappings
     auto mapped = m_mappings->Update( );
+    /*
     while (!mapped.empty( )){
         auto sub = ::std::move( mapped.back( ) );
         mapped.pop_back( );
@@ -329,7 +335,7 @@ bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
                 return false;
             }
         }
-    }
+    }*/
 
     // Add to the buffer, and check it if can be flushed
     m_buffer.push_back( arg );
@@ -348,37 +354,80 @@ bool VkSha256D::Instance::Flush(void) {
     if (m_buffer.empty( )){
         return true;
     }
-    const auto count = m_buffer.size( );
 
-    // Setup
-    auto& slice = m_slices.Current( );
-    auto reserve = [&](void) -> bool {
-        if (slice.Reserve( count )){
-            // Happy days
-            m_buffer.clear( );
-            return true;
-        }else{
-            m_batch.Pop( count );
-            return false;
+    auto flush = [&]() -> bool {
+        // Setup
+        const auto count = m_buffer.size( );
+        auto& slice = m_slices.Current( );
+        auto reserve = [&](void) -> bool {
+            if (slice.Reserve( count )){
+                // Happy days
+                m_buffer.clear( );
+                return true;
+            }else{
+                m_batch.Pop( count );
+                return false;
+            }
+        };
+
+        // Try and add the strings to the current batch
+        if (m_batch.Push( m_buffer )){
+            return reserve( );
         }
+
+        // If we get here, then the batch may be full,
+        // in which case, immediately send it off for mapping..
+        if (m_batch){
+            m_mappings->Map( ::std::move( m_batch ), slice.Sub( ), m_device.Queue( ) );
+        }
+
+        // And, try again with a new batch
+        m_batch = m_batches.New( m_device );
+        if (m_batch.Push( m_buffer )){
+            return reserve( );
+        }
+        return false;
     };
 
-    // Try and add the strings to the current batch
-    if (m_batch.Push( m_buffer )){
-        return reserve( );
+    const auto available = m_slices.Current( ).Available( );
+    if (available == 0U){
+        // Need to kick off a new mapping op and then create new slice + batch
+        auto& current = m_slices.Current( );
+        m_mappings->Map( ::std::move( m_batch ), current.Sub( ), m_device.Queue( ) );
+
+        // Allocate a new slice
+        auto& slice = m_slices.New( m_device );
+        if (!slice){
+            return false;
+        }
+
+        // And a new batch
+        m_batches.New( m_device );
+        return flush( );
+    }else if (available >= m_buffer.size( )){
+        // Don't need to make any special accomodations..
+        return flush( );
+    }else{
+        // Capture the overflow
+        decltype( m_buffer ) overflow;
+        overflow.reserve( m_buffer.size( ) );
+        do {
+            overflow.push_back( ::std::move( m_buffer.back( ) ) );
+            m_buffer.pop_back( );
+        } while (m_buffer.size( ) > available);
+        ::std::cout << "Overflow: " << overflow.size( ) << "." << ::std::endl;
+
+        // Now, try and flush
+        auto result = flush( );
+
+        // Regardless of the outcome, put back what we removed from the buffer
+        while (!overflow.empty( )){
+            m_buffer.push_back( ::std::move( overflow.back( ) ) );
+            overflow.pop_back( );
+        }
+        return result;
     }
 
-    // If we get here, then the batch may be full,
-    // in which case, immediately send it off for mapping..
-    if (m_batch){
-        m_mappings->Map( ::std::move( m_batch ), slice.Sub( ), m_device.Queue( ) );
-    }
-
-    // And, try again with a new batch
-    m_batch = m_batches.New( m_device );
-    if (m_batch.Push( m_buffer )){
-        return reserve( );
-    }
     return false;
 }
 

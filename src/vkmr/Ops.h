@@ -13,6 +13,7 @@
 // Local Project Headers
 #include "Slices.h"
 #include "Batches.h"
+#include "ISha256D.h"
 
 namespace vkmr {
 // Classes
@@ -50,7 +51,7 @@ public:
     virtual void Update(void) = 0;
 
     // Synchronously waits for all reductions to conclude
-    virtual VkSha256Result WaitFor(void) = 0;
+    virtual ISha256D::out_type WaitFor(void) = 0;
 
     static ::std::unique_ptr<Reductions> New(ComputeDevice&, typename slice_type::number_type);
 };

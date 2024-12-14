@@ -20,7 +20,7 @@
 //
 
 // Vulkan Extension Function Pointers
-extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkCmdPipelineBarrier2KHR g_pVkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
@@ -180,7 +180,7 @@ VkResult Mapping::Dispatch(VkQueue vkQueue, vkmr::Pipeline& pipeline) {
         host2ShaderDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         host2ShaderDep.memoryBarrierCount = 1;
         host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
-        g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
+        g_pVkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
         // Split into as many dispatches as are needed
         const auto bound = static_cast<uint>( m_batch.Count( ) );

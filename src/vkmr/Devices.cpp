@@ -20,7 +20,7 @@
 //
 
 // Vulkan Extension Function Pointers
-extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkCmdPipelineBarrier2KHR g_pVkCmdPipelineBarrier2KHR;
 extern PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 extern PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
 

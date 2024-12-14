@@ -119,7 +119,7 @@ public:
 
     // Reserves a  given number of, er, slot(s) (?) within the slice
     bool Reserve(size_type count = 1U) {
-        if (Available( ) > count){
+        if (Available( ) >= count){
             m_reserved += count;
             return true;
         }
@@ -136,6 +136,9 @@ public:
     // Returns the number of elements in the slice
     size_type Count(void) const { return m_sliced; }
 
+    // Returns the capacity of te slice, as a number of elements
+    size_type Capacity(void) const { return m_capacity; }
+ 
     // Gets the sub slice encompassing the reservations since the last 
     // sub slice, if any
     Slice Sub(void) {
@@ -229,8 +232,8 @@ private:
             ::vkDestroyBuffer( m_vkDevice, m_vkBuffer, VK_NULL_HANDLE );
         }
         if (m_vkDeviceMemory != VK_NULL_HANDLE){
-            ::std::cout << "Deallocating memory for slice " << this->Number( ) << ".." << ::std::endl;
             ::vkFreeMemory( m_vkDevice, m_vkDeviceMemory, VK_NULL_HANDLE );
+            ::std::cout << "Deallocated memory for slice " << this->Number( ) << ".." << ::std::endl;
         }
         Reset( );
     }
@@ -295,7 +298,7 @@ public:
     // or an empty slice if none
     slice_type Remove(index_type index) {
 
-        const auto found = m_container.find( m_current );
+        const auto found = m_container.find( index );
         if (found == m_container.cend( )){
             return slice_type( );
         }
@@ -457,6 +460,16 @@ public:
         // number of elements which is a power of 2
         const auto count = largest_pow2_le( vkSliceSize / sizeof( T ) );
         return count * sizeof( T );
+    }
+
+    bool Has(void) const {
+        return !m_container.empty( );
+    }
+
+    slice_type const& Any(void) const {
+        return Has( )
+            ? m_container.begin( )->second
+            : m_empty;
     }
 
 private:
