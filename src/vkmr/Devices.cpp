@@ -640,7 +640,7 @@ VkDeviceMemory ComputeDevice::Allocate(const MemoryTypeBudget& deviceMemoryBudge
     VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
     VkResult vkResult = ::vkAllocateMemory( m_vkDevice, &vkDeviceMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
     if (vkResult == VK_SUCCESS){
-        ::std::cout << "Allocated " << int64_t(vkSize) << " bytes of memory type " << vkDeviceMemoryAllocateInfo.memoryTypeIndex << ::std::endl;
+        //::std::cout << "Allocated " << int64_t(vkSize) << " bytes of memory type " << vkDeviceMemoryAllocateInfo.memoryTypeIndex << ::std::endl;
 
         // TODO, maybe: keep track of allocations? But, would that ever be useful?
         return vkDeviceMemory;

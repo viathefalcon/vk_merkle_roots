@@ -82,13 +82,13 @@ public:
 
     Slice& operator+=(Slice&& sub) {
         if (sub.Number( ) == Number( )){
-            m_filled += sub.m_vkSize / sizeof( T );
+            m_filled += sub.Reserved( );
         }
         return (*this);
     }
 
     bool IsFilled(void) const {
-        return m_filled == m_capacity;
+        return m_filled >= m_capacity;
     }
 
     // Returns the underlying buffer
@@ -174,6 +174,7 @@ public:
             }
             if (vkResult == VK_SUCCESS){
                 slice = Slice( m_number, m_vkDevice, vkBuffer, VK_NULL_HANDLE, vkBufferCreateInfo.size );
+                slice.Reserve( m_reserved );
 
                 // Update our own internal state
                 m_sliced += m_reserved;
@@ -203,6 +204,7 @@ private:
         m_sliced( 0U ),
         m_reserved( 0U ),
         m_capacity( vkSize / sizeof( T ) ),
+        m_filled( 0U ),
         m_number( number ) {
 
         // Calcalate the number of elements needed for the slice to be correctly
@@ -377,12 +379,13 @@ public:
             }
             if (vkResult == VK_SUCCESS){
                 // Bingo
-                const auto number = ++m_current; 
+                const auto number = (m_current + 1); 
                 auto emplaced = m_container.emplace(
                     number,
                     slice_type( number, vkDevice, vkBuffer, vkDeviceMemory, vkSliceSize )
                 );
                 if (emplaced.second){
+                    m_current = number;
                     return (emplaced.first)->second;
                 }
             }

@@ -316,26 +316,21 @@ bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
 
     // Update the state of any in-flight mappings
     auto mapped = m_mappings->Update( );
-    /*
     while (!mapped.empty( )){
         auto sub = ::std::move( mapped.back( ) );
         mapped.pop_back( );
+        std::cout << "Mapping for slice #" << sub.Number( ) << " (" << sub.Reserved( ) << ") finished." << std::endl;
 
         const auto number = sub.Number( );
         auto& slice = m_slices[number];
         slice += ::std::move( sub );
         if (slice.IsFilled( )){
+            std::cout << "Slice #" << slice.Number( ) << " has been filled." << ::std::endl;
+
             // Kick off a new reduction
             m_reductions->Reduce( m_slices.Remove( number ), m_device );
-
-            // Allocate a new slice
-            auto& next = m_slices.New( m_device );
-            if (!next){
-                // Probably out of memory, so stop here
-                return false;
-            }
         }
-    }*/
+    }
 
     // Add to the buffer, and check it if can be flushed
     m_buffer.push_back( arg );
@@ -402,7 +397,7 @@ bool VkSha256D::Instance::Flush(void) {
         }
 
         // And a new batch
-        m_batches.New( m_device );
+        m_batch = m_batches.New( m_device );
         return flush( );
     }else if (available >= m_buffer.size( )){
         // Don't need to make any special accomodations..
