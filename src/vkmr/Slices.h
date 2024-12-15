@@ -214,7 +214,7 @@ private:
         if (vkMemoryRequirements.alignment == 0){
             m_alignedCount = 1;
         }else{
-            m_alignedCount = lowest_common_multiple( sizeof( T ), vkMemoryRequirements.alignment ) / sizeof( T );
+            m_alignedCount = lowest_common_multiple( sizeof( T ), static_cast<size_t>( vkMemoryRequirements.alignment ) ) / sizeof( T );
         }
     }
 
