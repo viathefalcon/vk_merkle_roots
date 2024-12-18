@@ -29,7 +29,7 @@ FLATPAK_ENABLE_SDK_EXT=llvm18 flatpak run --devel com.visualstudio.code
 ```
 
 #### Running the Program
-The program, once built, also needs to run in a Flatpak container in which the LLVM16 extension is available. So, I open a shell in the VS Code sandbox:
+The program, once built, also needs to run in a Flatpak container in which the LLVM 18 extension is available. So, I open a shell in the VS Code sandbox:
 ```
 FLATPAK_ENABLE_SDK_EXT=llvm18 flatpak run --command=sh --devel com.visualstudio.code
 ```
