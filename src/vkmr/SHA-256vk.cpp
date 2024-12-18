@@ -20,7 +20,7 @@
 // Constants
 //
 
-static const VkDeviceSize MegaX = (64 * 1024 * 1024);
+static const VkDeviceSize MegaX = (256 * 1024 * 1024);
 
 // Globals
 //
@@ -313,6 +313,9 @@ ISha256D::out_type VkSha256D::Instance::Root(void) {
 }
 
 bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
+
+    // Update the state of any in-flight reductions
+    m_reductions->Update( );
 
     // Update the state of any in-flight mappings
     auto mapped = m_mappings->Update( );
