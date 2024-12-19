@@ -320,41 +320,30 @@ public:
             return m_empty;
         }
 
-        // Get the target slice size
+        // Get the target slice size, adjusting for whole element size
         auto vkSliceSize = this->SliceSize( device );
+        vkSliceSize = vkSliceSize - (vkSliceSize % sizeof( T ));
 
-        // Loop until we've maybe allocated _something_
+        // Look for corresponding on-device memory
+        const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSliceSize );
+        auto deviceMemoryBudgets = device.AvailableMemoryTypes(
+            vkMemoryRequirements,
+            c_vkMemoryPropertyFlags
+        );
+        const auto vkAllocationSize = vkMemoryRequirements.size;
+        std::cout << "Looking for " << vkAllocationSize << " bytes of sliced memory.." << std::endl;
+
+        // Iterate and try to allocate
         VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
-        do {
-            // Adjust for whole element size
-            vkSliceSize = vkSliceSize - (vkSliceSize % sizeof( T ));
-
-            // Look for corresponding on-device memory
-            const VkMemoryRequirements vkMemoryRequirements = device.StorageBufferRequirements( vkSliceSize );
-            auto deviceMemoryBudgets = device.AvailableMemoryTypes(
-                vkMemoryRequirements,
-                c_vkMemoryPropertyFlags
-            );
-            const auto vkAllocationSize = vkMemoryRequirements.size;
-            std::cout << "Looking for " << vkAllocationSize << " bytes of sliced memory.." << std::endl;
-
-            // Iterate and try to allocate
-            for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); (vkDeviceMemory == VK_NULL_HANDLE) && (it != end); it++){
-                const auto& deviceMemoryBudget = *it;
-                if (deviceMemoryBudget.vkMemoryBudget < vkAllocationSize){
-                    // Nah, not interested
-                    continue;
-                }
-                vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkAllocationSize );
-            }
-
-            if (vkDeviceMemory == VK_NULL_HANDLE){
-                // Try again for half the size?
-                vkSliceSize = (vkSliceSize >> 1);
+        for (auto it = deviceMemoryBudgets.cbegin( ), end = deviceMemoryBudgets.cend( ); (vkDeviceMemory == VK_NULL_HANDLE) && (it != end); it++){
+            const auto& deviceMemoryBudget = *it;
+            if (deviceMemoryBudget.vkMemoryBudget < vkAllocationSize){
+                // Nah, not interested
                 continue;
             }
-
-            // Otherwise, try and wrap it all up
+            vkDeviceMemory = device.Allocate( deviceMemoryBudget, vkAllocationSize );
+        }
+        if (vkDeviceMemory != VK_NULL_HANDLE){
             const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
             auto vkDevice = *device;
 
@@ -390,8 +379,7 @@ public:
                 }
             }
             device.Free( vkDeviceMemory );
-            break;
-        } while (vkSliceSize > 1U);
+        }
         return m_empty;
     }
 

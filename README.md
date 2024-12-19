@@ -50,8 +50,30 @@ It was when I got a Steam Deck that I decided to reboot the project based on Vul
 ## Design
 
 ### Goals
-1. Be able to compute the Merkle roots of arbitrary data sets entirely on GPU via parallel reduction;
-1. Not have any dependencies beyond Vulkan and the C++ Standard Library.
+* Be able to compute the Merkle roots of arbitrary data sets entirely on GPU via parallel reduction;
+* Not have any dependencies beyond Vulkan and the C++ Standard Library.
 
 ### Non-Goals
-1. Performance: where there is a choice between doing something on the GPU and doing it more performantly on the CPU, do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
+* Performance: where there is a choice between doing something on the GPU and doing it more performantly on the CPU, do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
+
+### Choices
+
+#### Hash Function
+
+I chose [SHA-256d](https://bitcoinwiki.org/wiki/sha-256d), or double `SHA-256`, as the hash function because it is used in Bitcoin, and to spare myself the effort of evaluating different hash functions. Additionally, it has the agreeable property that the 256-bit/32-byte output is naturally aligned in most places that that matters.
+
+`SHA-256d` outputs the result of applying the `SHA-256` algorithm to the result of applying `SHA-256` to the input.
+
+#### Subgroups
+
+Merkle root calculation generates a _lot_ of intermediate values that are ultimately discarded. We avoid writing many of those values to memory by using [Subgroups](https://docs.vulkan.org/guide/latest/subgroups.html) (where supported), such that instead of each reduction invocation taking a pair of inputs and writing a single output, groups of invocations reduce whole subtrees by sharing intermediate values and writing a single output. Using subgroups in this way also reduces the total number of dispatches needed to calculate the root of the sub-tree for any given slice.
+
+### Basic Flow
+
+The program implements a kind of stream processor. Inputs are read from a stream and accumulated into _batches_; once a given batch is full, or the end of the input stream has been reached, the batch is sent to the GPU to be mapped.
+
+_Mapping_ comprises two operations: applying the hash function to inputs and writing the outputs to "device local" memory, which is divided into _slices_. Each such slice holds up to some power of 2 number of hashes, which comprise the leaves of the tree whose root we are looking to calculate, and all slices are the same size.
+
+Once a given slice is full, or the end of the input stream has been reached, the slice is sent for _reduction_. Each reduction calculates the root of the sub-tree of the slice to which the reduction is applied. Once all reductions have concluded, the outputs from each are used to calculate (on the CPU, in contravention of the goals outlined above..) the root of the tree for which they are the leaves.
+
+Once each mapping and reduction conclude, the memory associated with the the corresponding batch or slice is immediately returned to the system. Additionally, every mapping and reduction runs asynchronously with respect to every other mapping and reduction as well as reading of (any) subsequent inputs, and the program does not need to have read in the entire dataset before it can start calculating the Merkle root.
