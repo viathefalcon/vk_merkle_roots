@@ -322,7 +322,6 @@ bool VkSha256D::Instance::Add(const ISha256D::arg_type& arg) {
     while (!mapped.empty( )){
         auto sub = ::std::move( mapped.back( ) );
         mapped.pop_back( );
-        std::cout << "Mapping for slice #" << sub.Number( ) << " (" << sub.Reserved( ) << ") finished." << std::endl;
 
         const auto number = sub.Number( );
         auto& slice = m_slices[number];

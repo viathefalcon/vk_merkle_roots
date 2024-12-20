@@ -18,6 +18,7 @@
 #include "Debug.h"
 #include "Utils.h"
 #include "SHA-256plus.h"
+#include "QueryPoolTimers.h"
 
 // Externals
 //
@@ -73,6 +74,7 @@ public:
 
     VkSha256Result Read(void);
     VkResult Apply(Reductions::slice_type&&, ComputeDevice&, const vkmr::Pipeline&);
+    virtual double Elapsed(void);
 
 protected:
     Reduction();
@@ -195,6 +197,10 @@ VkResult Reduction::Apply(Reductions::slice_type&& slice, ComputeDevice& device,
         }
     }
     return m_vkResult; 
+}
+
+double Reduction::Elapsed(void) {
+    return 0;
 }
 
 void Reduction::Free(void) {
@@ -375,10 +381,14 @@ CommandBuffer& BasicReduction::GetCommandBuffer(ComputeDevice& device, const vkm
 
 class ReductionBySubgroup : public Reduction {
 public:
-    ReductionBySubgroup(VkDevice, DescriptorSet&&, CommandBuffer&&);
+    ReductionBySubgroup(VkDevice, DescriptorSet&&, CommandBuffer&&, QueryPoolTimer&&);
     virtual ~ReductionBySubgroup(void) { }
 
     virtual CommandBuffer& GetCommandBuffer(ComputeDevice&, const vkmr::Pipeline&);
+
+    double Elapsed(void) {
+        return m_queryPoolTimer.ElapsedMillis( );
+    }
 
 private:
     VkDeviceSize m_vkSize;
@@ -386,14 +396,16 @@ private:
 
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
+    QueryPoolTimer m_queryPoolTimer;
 };
 
-ReductionBySubgroup::ReductionBySubgroup(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer):
+ReductionBySubgroup::ReductionBySubgroup(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, QueryPoolTimer&& queryPoolTimer):
     Reduction( VK_RESULT_MAX_ENUM, vkDevice ),
     m_vkSize( 0U ),
     m_count( 0U ),
     m_descriptorSet( ::std::move( descriptorSet ) ),
-    m_commandBuffer( ::std::move( commandBuffer ) ) { }
+    m_commandBuffer( ::std::move( commandBuffer ) ),
+    m_queryPoolTimer( ::std::move( queryPoolTimer ) ) { }
 
 CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, const vkmr::Pipeline& pipeline) {
 
@@ -423,6 +435,9 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
     if (m_vkResult == VK_SUCCESS){
         VkPhysicalDeviceProperties vkPhysicalDeviceProperties = {};
         ::vkGetPhysicalDeviceProperties( device.PhysicalDevice( ), &vkPhysicalDeviceProperties );
+
+        // Capture the timstamp
+        m_queryPoolTimer.Start( vkCommandBuffer );
 
         ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
         VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
@@ -486,8 +501,7 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
             }
             delta *= (workgroupSize.x << 1); // x2 because each invocation in the group has addressed two items
         }
-    }
-    if (m_vkResult == VK_SUCCESS){
+
         // Insert a barrier such that the writes from the shader complete
         // before we try and copy back to host-mappable memory
         VkMemoryBarrier2KHR vkMemoryBarrier = {};
@@ -506,6 +520,9 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
         VkBufferCopy vkBufferCopy = {};
         vkBufferCopy.size = sizeof( VkSha256Result );
         ::vkCmdCopyBuffer( vkCommandBuffer, m_slice.Buffer( ), m_vkBufferHost, 1, &vkBufferCopy );
+
+        // Capture the timestamp and wrap it up
+        m_queryPoolTimer.Finish( vkCommandBuffer );
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }
     return (m_commandBuffer);
@@ -515,7 +532,9 @@ class ReductionFactory {
 public:
     typedef ::std::shared_ptr<Reduction> ProductType;
 
-    ReductionFactory(bool subgroupSupportPreferred): m_subgroupSupportPreferred( subgroupSupportPreferred ) { }
+    ReductionFactory(ComputeDevice& device, bool subgroupSupportPreferred):
+        m_subgroupSupportPreferred( subgroupSupportPreferred ),
+        m_queryPoolTimers( device ) { }
     ~ReductionFactory() = default;
 
     ProductType CreateReduction(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer) {
@@ -527,7 +546,8 @@ public:
             product = make_shared<ReductionBySubgroup>(
                 vkDevice,
                 ::std::move( descriptorSet ),
-                ::std::move( commandBuffer )
+                ::std::move( commandBuffer ),
+                m_queryPoolTimers.New( )
             );
         }else{
             product = make_shared<BasicReduction>(
@@ -541,7 +561,9 @@ public:
 
 private:
     bool m_subgroupSupportPreferred;
+    QueryPoolTimers m_queryPoolTimers;
 };
+
 class ReductionsImpl : public Reductions {
 public:
     ReductionsImpl(ComputeDevice& device, vkmr::Pipeline&& pipeline, DescriptorPool&& descriptorPool, bool subgroupSupportPreferred):
@@ -549,7 +571,7 @@ public:
         m_descriptorPool( ::std::move( descriptorPool ) ),
         m_commandPool( device.CreateCommandPool( ) ),
         m_pipeline( ::std::move( pipeline ) ),
-        m_factory( ReductionFactory( subgroupSupportPreferred ) ) { }
+        m_factory( ReductionFactory( device, subgroupSupportPreferred ) ) { }
 
     virtual ~ReductionsImpl() {
 
@@ -600,7 +622,12 @@ void ReductionsImpl::Update(void) {
         auto vkFence = static_cast<VkFence>( *reduction );
         auto vkResult = ::vkGetFenceStatus( m_vkDevice, vkFence );
         if (vkResult == VK_SUCCESS){
-            ::std::cout << "Reduction #" << reduction->Number( ) << " finished." << ::std::endl;
+            ::std::cout << "Reduction #" << reduction->Number( ) << " finished";
+            auto elapsed = reduction->Elapsed( );
+            if (elapsed != 0){
+                ::std::cout << " in " << elapsed << "ms";
+            }
+            ::std::cout << "." << ::std::endl;
 
             VkSha256Result vkSha256Result = reduction->Read( );
             for (auto u = 0U; u < SHA256_WC; ++u){
