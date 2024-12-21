@@ -40,6 +40,7 @@ public:
     } VkBufferDescriptors;
 
     typedef uint32_t number_type;
+    typedef size_t size_type;
 
     Batch(Batch&&);
     Batch(Batch const&) = delete;
@@ -52,7 +53,10 @@ public:
     operator bool() const { return (static_cast<bool>( m_data ) && static_cast<bool>( m_metadata )); }
 
     // Returns the number of strings in the batch
-    size_t Count(void) const { return m_count; }
+    size_type Count(void) const { return m_count; }
+
+    // Returns the size of the batch, in bytes
+    size_type Size(void) const;
 
     // Returns true if the batch is empty; false otherwise
     bool Empty(void) const {

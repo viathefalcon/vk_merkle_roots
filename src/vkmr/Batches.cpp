@@ -46,6 +46,21 @@ Batch& Batch::operator=(Batch&& batch) {
     return (*this);
 }
 
+Batch::size_type Batch::Size(void) const {
+
+    size_type size = 0;
+    for (size_type s = 0; s < m_count; s++){
+        VkSha256Metadata metadata;
+        ::std::memcpy(
+            &metadata,
+            static_cast<unsigned char*>( m_metadata.pData ) + (s * sizeof( VkSha256Metadata )),
+            sizeof( VkSha256Metadata )
+        );
+        size += metadata.size;
+    }
+    return size;
+}
+
 bool Batch::Push(const ::std::vector<::std::string>& strings) {
 
     // Look for an early out

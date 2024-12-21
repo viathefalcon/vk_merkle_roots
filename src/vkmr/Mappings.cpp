@@ -60,6 +60,10 @@ public:
         return m_queryPoolTimer;
     }
 
+    const Batch& Subject(void) const {
+        return m_batch;
+    }
+
 private:
     void Reset(void);
     void Release(void);
@@ -326,10 +330,11 @@ VkResult MappingsImpl::Map(Batch&& batch, Slice<VkSha256Result>&& slice, VkQueue
 
             // Accumulate the slice
             slices.push_back( ::std::move( mapping.MoveSlice( ) ) );
+            const auto& batch = mapping.Subject( );
 
             // Output
-            auto& sub = slices.back( );
-            std::cout << "Mapping for slice #" << sub.Number( ) << " (" << sub.Reserved( ) << ") finished";
+            const auto& sub = slices.back( );
+            std::cout << "Mapping for slice #" << sub.Number( ) << " (" << sub.Reserved( ) << " item(s); " << batch.Size( ) << " byte(s)) finished";
             auto elapsed = mapping.Timer( ).ElapsedMillis( );
             if (elapsed != 0){
                 ::std::cout << " in " << elapsed << "ms";
