@@ -45,8 +45,6 @@ Initially, the goal was to investigate the practicality of using a GPU, as an as
 
 Pulling a proof-of-concept together, using OpenCL, really wasn't too difficult, but iterating on it proved .. if not impossible then certainly impractical. The main sticking point was overcoming the requirement for a synchronous round trip between the host (CPU) and the accelerator (GPU) for each level of the tree. The specs for OpenCL 2.x+  provide a mechanism to avoid this - [Device-Side Enqueue](https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html#device-side-enqueue) - but support for OpenCL across vendors and devices varied, to put it mildly, and I could only get device-side enqueueing to work on one (1) integrated Intel GPU. When I tried to code around this, using OpenCL ~1.2 and pushing as much of the conditional logic as I could into compute shaders, I ended up with [this hot mess](https://gist.github.com/viathefalcon/6d82a14214d6e4f7af29b75133ef6c16).
 
-It was when I got a Steam Deck that I decided to reboot the project based on Vulkan (in part to have something for the Deck to do..)
-
 ## Design
 
 ### Goals
@@ -58,15 +56,21 @@ It was when I got a Steam Deck that I decided to reboot the project based on Vul
 
 ### Choices
 
-#### Hash Function
+#### SHA-256d
 
-I chose [SHA-256d](https://bitcoinwiki.org/wiki/sha-256d), or double `SHA-256`, as the hash function because it is used in Bitcoin, and to spare myself the effort of evaluating different hash functions. Additionally, it has the agreeable property that the 256-bit/32-byte output is naturally aligned in most places that that matters.
+I chose [SHA-256d](https://bitcoinwiki.org/wiki/sha-256d), or double `SHA-256`, as the hash function because it is used in Bitcoin, sparing myself the effort of evaluating different hash functions. Additionally, it has the agreeable property that the 256-bit/32-byte output is naturally aligned in most places that such alignment matters.
 
-`SHA-256d` outputs the result of applying the `SHA-256` algorithm to the result of applying `SHA-256` to the input.
+`SHA-256d` outputs the result of applying the `SHA-256` algorithm to the result of applying the `SHA-256` algorithm to an input.
+
+#### Vulkan
+
+It was when I got a Steam Deck that I decided to reboot the project based on Vulkan. In part, this was to have something for the Deck to do, but also an opportunity to learn how to work with Vulkan, which I thought could come in useful for future projects.
 
 #### Subgroups
 
-Merkle root calculation generates a _lot_ of intermediate values that are ultimately discarded. We avoid writing many of those values to memory by using [Subgroups](https://docs.vulkan.org/guide/latest/subgroups.html) (where supported), such that instead of each reduction invocation taking a pair of inputs and writing a single output, groups of invocations reduce whole subtrees by sharing intermediate values and writing a single output. Using subgroups in this way also reduces the total number of dispatches needed to calculate the root of the sub-tree for any given slice.
+Merkle root calculation generates a _lot_ of intermediate values, all of which are ultimately discarded. We avoid writing many of those values to memory by using [Subgroups](https://docs.vulkan.org/guide/latest/subgroups.html) (where supported), such that instead of each reduction invocation taking a pair of inputs and writing a single output, groups of invocations reduce whole sub-trees by sharing intermediate values - using subgroups shuffle operations, c.f. _#extension GL_KHR_shader_subgroup_shuffle_relative_ in [Vulkan Subgroup Tutorial](https://www.khronos.org/blog/vulkan-subgroup-tutorial) - and writing a single output.
+
+Using subgroups in this way also reduces the total number of dispatches needed to calculate the root of the sub-tree for any given slice.
 
 ### Basic Flow
 
@@ -77,3 +81,40 @@ _Mapping_ comprises two operations: applying the hash function to inputs and wri
 Once a given slice is full, or the end of the input stream has been reached, the slice is sent for _reduction_. Each reduction calculates the root of the sub-tree of the slice to which the reduction is applied. Once all reductions have concluded, the outputs from each are used to calculate (on the CPU, in contravention of the goals outlined above..) the root of the tree for which they are the leaves.
 
 Once each mapping and reduction conclude, the memory associated with the the corresponding batch or slice is immediately returned to the system. Additionally, every mapping and reduction runs asynchronously with respect to every other mapping and reduction as well as reading of (any) subsequent inputs, and the program does not need to have read in the entire dataset before it can start calculating the Merkle root.
+
+## Non-Functional Outputs
+
+### The Power of the Powers of 2
+The key insight which made the whole thing work was in part a by-product of working with different implementations of the Vulkan memory model: namely, the only way to reliably allocate on-device memory is in chunks-at-a-time, and getting shaders/shader invocations to span arbitrary numbers of such chunks is prohibitively difficult (if not impossible).
+
+It is possible to query Vulkan for the amount of memory provided by implementations, the likely amount of such memory available for allocation and the maximum size of any such allocation supported by an implementation. But, as I have discovered, an implementation can reject any request to allocate that satisfies those constraints regardless.
+
+So, the most reliable way appears to be to simply allocate smaller chunks until you have enough or the system runs out. This being the case, to be able to reduce datasets with more than, for example, 8388608 ([256MB](https://gpuopen.com/learn/vulkan-device-memory/) worth of) elements, then the program needed to be able to handle datasets for which the corresponding Merkle tree must be distributed across non-contiguous memory buffers.
+
+Because Merkle trees are binary trees, they can be divided into `n` sub-trees spanning an equal number of elements, `m`, where `m` is some power of 2, plus up to one additional sub-tree for datasets whose cardinality is not a multiple of `m`. The Merkle root of each of these sub-trees can then be calculated, independently of one another, with special consideration only needing to be given to sub-tree `n+1`, if it exists: it needs to be reduced as if it had the same height as the other sub-trees. (This essentially means that we need to keep iterating on it even after it has been reduced to a single element.)
+
+The Merkle root of the whole dataset can then be calculated as the Merkle root of the tree for which the sub-trees' Merkle roots form the leaves.
+
+### Other numbers
+
+Overall, the program is not terribly quick, but I was curious to see how much time was being spent processing on the GPU, and: 
+
+| Platform | Mapping | Reduction (by Subgroups) | Effective Hashrate |
+| ------------- | ------------- | ------------- | ------------- |
+| Steam Deck (LCD)  | ~252MB in ~190ms = ~1.295GB/s  | 256MB in ~800ms = 320MB/s | ~20.9 MH/s |
+| Intel Iris Xe Graphics (12th Gen, integrated) | ~252MB in ~80ms = ~3.039GB/s  | 256MB in 300ms = ~853.33MB/s | ~55.9MH/s |
+| nVidia RTX 4070 Super (via Thunderbolt) | ~252MB in ~265ms = ~951MB/s  | 256MB in _<16ms_ = ~16GB/s | ~1.118 GH/s |
+
+I had only intended on including the numbers from the Steam Deck (since it is a relatively standardised platform) but the results of running the same tests - using the same dataset - against an RTX 4070 Super, even one connected as an eGPU, were .. eyebrow-raising.
+
+### To Do, Sometime. Maybe.
+#### Improve Throughput
+Had I the time/incentive, these are the improvements I would probably work on next:
+* where there is at least one in-flight mapping (or reduction) operation and a request to allocate memory for a new batch (or slice) is rejected by the implementation, then block on the completion of the operation and re-use the associated batch (or slice), rather than halting;
+* where calculating the Merkle root of a dataset requires more than one reduction, then feed the output of those reductions into a new reduction operation.
+
+These would allow the program to use GPUs to calculate the roots of datasets for which the corresponding Merkle tree would require more memory than is available to the target GPU at runtime when the dataset could be read in faster than it could be reduced on the GPU.
+
+#### Generate, Output Merkle Proofs
+
+It wouldn't be difficult to modify the program, shader(s), etc. to generate a Merkle proof for a given element of the dataset at the same time as calculating the root: for an indicated leaf, allocate a buffer to hold and write out the intermediate values during reduction.
