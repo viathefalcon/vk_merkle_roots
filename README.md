@@ -64,11 +64,11 @@ I chose [SHA-256d](https://bitcoinwiki.org/wiki/sha-256d), or double `SHA-256`, 
 
 #### Vulkan
 
-It was when I got a Steam Deck that I decided to reboot the project based on Vulkan. In part, this was to have something for the Deck to do, but also an opportunity to learn how to work with Vulkan, which I thought could come in useful for future projects.
+It was when I got a Steam Deck that I decided to reboot the project based on Vulkan. In part, this was to have something for the Deck to do, but also for me to learn how to work with Vulkan.
 
 #### Subgroups
 
-Merkle root calculation generates a _lot_ of intermediate values, all of which are ultimately discarded. We avoid writing many of those values to memory by using [Subgroups](https://docs.vulkan.org/guide/latest/subgroups.html) (where supported), such that instead of each reduction invocation taking a pair of inputs and writing a single output, groups of invocations reduce whole sub-trees by sharing intermediate values - using subgroups shuffle operations, c.f. _#extension GL_KHR_shader_subgroup_shuffle_relative_ in [Vulkan Subgroup Tutorial](https://www.khronos.org/blog/vulkan-subgroup-tutorial) - and writing a single output.
+Merkle root calculation generates a _lot_ of intermediate values, all of which are ultimately discarded. We avoid writing many of those values to memory by using [Subgroups](https://docs.vulkan.org/guide/latest/subgroups.html) (where supported), such that instead of each reduction invocation taking a pair of inputs and writing a single output, groups of invocations reduce whole sub-trees by sharing intermediate values - using subgroup shuffle operations, c.f. _#extension GL_KHR_shader_subgroup_shuffle_relative_ in [Vulkan Subgroup Tutorial](https://www.khronos.org/blog/vulkan-subgroup-tutorial) - and writing a single output.
 
 Using subgroups in this way also reduces the total number of dispatches needed to calculate the root of the sub-tree for any given slice.
 
@@ -80,7 +80,7 @@ _Mapping_ comprises two operations: applying the hash function to inputs and wri
 
 Once a given slice is full, or the end of the input stream has been reached, the slice is sent for _reduction_. Each reduction calculates the root of the sub-tree of the slice to which the reduction is applied. Once all reductions have concluded, the outputs from each are used to calculate (on the CPU, in contravention of the goals outlined above..) the root of the tree for which they are the leaves.
 
-Once each mapping and reduction conclude, the memory associated with the the corresponding batch or slice is immediately returned to the system. Additionally, every mapping and reduction runs asynchronously with respect to every other mapping and reduction as well as reading of (any) subsequent inputs, and the program does not need to have read in the entire dataset before it can start calculating the Merkle root.
+Once each mapping and reduction conclude, the memory associated with the the corresponding batch or slice is immediately returned to the system. Additionally, every mapping and reduction runs asynchronously with respect to every other mapping and reduction as well as reading of any subsequent inputs, and the program does not need to have read in the entire dataset before it can start calculating the Merkle root.
 
 ## Non-Functional Outputs
 
@@ -95,7 +95,7 @@ Because Merkle trees are binary trees, they can be divided into `n` sub-trees sp
 
 The Merkle root of the whole dataset can then be calculated as the Merkle root of the tree for which the sub-trees' Merkle roots form the leaves.
 
-### Other numbers
+### Other Numbers
 
 Overall, the program is not terribly quick, but I was curious to see how much time was being spent processing on the GPU, and: 
 
