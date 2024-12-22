@@ -13,6 +13,7 @@
 // Local Project Headers
 #include "Slices.h"
 #include "Batches.h"
+#include "ISha256D.h"
 
 namespace vkmr {
 // Classes
@@ -21,12 +22,14 @@ namespace vkmr {
 // Encapsulates mappings of input batches to a slices of device memory
 class Mappings {
 public:
+    typedef Slice<VkSha256Result> slice_type;
+
     virtual ~Mappings(void) = default;
 
-    virtual VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue) = 0;
+    virtual VkResult Map(Batch&&, slice_type&&, VkQueue) = 0;
 
     // Updates the status of in-flight mappings
-    virtual void Update(void) = 0;
+    virtual ::std::vector<slice_type> Update(void) = 0;
 
     // Synchronously waits for all in-flight mappings to complete
     virtual void WaitFor(void) = 0;
@@ -37,11 +40,20 @@ public:
 // Encapsulates reductions of slices of device memory to a single value
 class Reductions {
 public:
+    typedef Slice<VkSha256Result> slice_type;
+
     virtual ~Reductions(void) = default;
 
-    virtual VkSha256Result Reduce(Slice<VkSha256Result>&, ComputeDevice&) = 0;
+    // Initiates a new reduction of the given slice of on-device memory
+    virtual VkResult Reduce(slice_type&&, ComputeDevice&) = 0;
 
-    static ::std::unique_ptr<Reductions> New(ComputeDevice&);
+    // Updates the status of in-progress reductions
+    virtual void Update(void) = 0;
+
+    // Synchronously waits for all reductions to conclude
+    virtual ISha256D::out_type WaitFor(void) = 0;
+
+    static ::std::unique_ptr<Reductions> New(ComputeDevice&, typename slice_type::number_type);
 };
 
 } // namespace vkmr

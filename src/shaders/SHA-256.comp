@@ -64,6 +64,7 @@ layout(push_constant, std430) uniform pc {
     uint offset;
     uint pairs;
     uint delta;
+    uint d2;
     uint bound;
 };
 #else
@@ -331,13 +332,10 @@ void main() {
     // We clamp this to the bounds of the input data so every invocation
     // at or past this point will end up calculating the root of the
     // same sub-tree (but we only care about the first invocation)
-    const uint globalInvocationID = (gl_GlobalInvocationID.x + offset);
-    uint w = globalInvocationID * (delta << 1);
-    uint v = (bound - 1);
-    const uint idx = (w < bound) ? w : v;
+    const uint idx = clamp( (gl_GlobalInvocationID.x + offset) * d2, 0, (bound-1) );
 
     // Prep the first message block
-    uint u;
+    uint u, v, w;
     for (u = 0, v = 0, w = idx; u < SHA256_WC; ++u, ++v){
         M[v] = leaf[w].data[u];
     }
@@ -346,18 +344,11 @@ void main() {
         M[v] = leaf[w].data[u];
     }
 
-    // Calc the number of invocations beyond the current (sub)group,
-    // and use to calculate the maximum distance of a shuffle down op
-    v = (pairs - (globalInvocationID - gl_LocalInvocationID.x));
-    uint maxShuffleDist = ((v < localSizeX) ? v : localSizeX);
-    maxShuffleDist -= (gl_LocalInvocationID.x + 1);
-
     // Loop until we have reduced to one active invocation, where
-    // the number of such invocations is the smaller of the sizes
-    // of the workgroup and the problem space (expressed as the
-    // number of pairs of inputs)
+    // the number of such invocations is size of the problem space,
+    // expressed as the number of pairs of inputs
     uvec4 H1, H2;
-    for (uint dx = 1, invocations = (pairs < localSizeX) ? pairs : localSizeX; invocations > 1; dx <<= 1 ){
+    for (uint dw = 1, invocations = pairs; invocations > 1; dw <<= 1){
         // Hash the contents of the message block
         sha256_be_2( H1, H2 );
 
@@ -371,8 +362,10 @@ void main() {
 
         // Now, figure out the relative index of the thread
         // from which we want to grab the other half of the
-        // input to the next iteration
-        w = (dx <= maxShuffleDist) ? dx : 0;
+        // input to the next iteration; this doubles at each
+        // iteration, but not if it would mean reading past
+        // the end of the source array
+        w = ((idx + (dw * d2)) < bound) ? dw : 0;
 
         // Fetch and append to the message block
         uvec4 h = subgroupShuffleDown( H1, w );

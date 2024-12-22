@@ -15,12 +15,13 @@
 
 // Local Project Headers
 #include "Debug.h"
+#include "QueryPoolTimers.h"
 
 // Externals
 //
 
 // Vulkan Extension Function Pointers
-extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkCmdPipelineBarrier2KHR g_pVkCmdPipelineBarrier2KHR;
 
 namespace vkmr {
 
@@ -37,7 +38,7 @@ struct alignas(uint) MappingPushConstants {
 class Mapping {
 public:
     Mapping(Mapping&&);
-    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, Batch&&, Slice<VkSha256Result>&&, uint32_t);
+    Mapping(VkDevice, DescriptorSet&&, CommandBuffer&&, Batch&&, Mappings::slice_type&&, uint32_t, QueryPoolTimer&&);
     Mapping(Mapping const&) = delete;
 
     Mapping(void) { Reset( ); }
@@ -51,6 +52,18 @@ public:
 
     VkResult Dispatch(VkQueue, vkmr::Pipeline&);
 
+    Mappings::slice_type&& MoveSlice(void) {
+        return ::std::move( m_slice );
+    }
+
+    const QueryPoolTimer& Timer(void) const {
+        return m_queryPoolTimer;
+    }
+
+    const Batch& Subject(void) const {
+        return m_batch;
+    }
+
 private:
     void Reset(void);
     void Release(void);
@@ -62,7 +75,8 @@ private:
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
     Batch m_batch;
-    Slice<VkSha256Result> m_slice;
+    Mappings::slice_type m_slice;
+    QueryPoolTimer m_queryPoolTimer;
 
     uint32_t m_maxComputeWorkGroupCount;
 };
@@ -75,12 +89,13 @@ Mapping::Mapping(Mapping&& mapping):
     m_commandBuffer( ::std::move( mapping.m_commandBuffer ) ),
     m_batch( ::std::move( mapping.m_batch ) ),
     m_slice( ::std::move( mapping.m_slice ) ),
-    m_maxComputeWorkGroupCount( mapping.m_maxComputeWorkGroupCount ) {
+    m_maxComputeWorkGroupCount( mapping.m_maxComputeWorkGroupCount ),
+    m_queryPoolTimer( ::std::move( mapping.m_queryPoolTimer ) ) {
     
     mapping.Reset( );
 }
 
-Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, Batch&& batch, Slice<VkSha256Result>&& slice, uint32_t maxComputeWorkGroupCount):
+Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, Batch&& batch, Mappings::slice_type&& slice, uint32_t maxComputeWorkGroupCount, QueryPoolTimer&& queryPoolTimer):
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
@@ -88,7 +103,8 @@ Mapping::Mapping(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer
     m_commandBuffer( ::std::move( commandBuffer ) ),
     m_batch( ::std::move( batch ) ),
     m_slice( ::std::move( slice ) ),
-    m_maxComputeWorkGroupCount( maxComputeWorkGroupCount ) {
+    m_maxComputeWorkGroupCount( maxComputeWorkGroupCount ),
+    m_queryPoolTimer( ::std::move( queryPoolTimer ) ) {
 
     // Create the fence
     VkFenceCreateInfo vkFenceCreateInfo = {};
@@ -109,6 +125,7 @@ Mapping& Mapping::operator=(Mapping&& mapping) {
         m_batch = ::std::move( mapping.m_batch );
         m_slice = ::std::move( mapping.m_slice );
         m_maxComputeWorkGroupCount = mapping.m_maxComputeWorkGroupCount;
+        m_queryPoolTimer = ::std::move( mapping.m_queryPoolTimer );
 
         mapping.Reset( );
     }
@@ -160,6 +177,7 @@ VkResult Mapping::Dispatch(VkQueue vkQueue, vkmr::Pipeline& pipeline) {
     vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     m_vkResult = ::vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
     if (m_vkResult == VK_SUCCESS){
+        m_queryPoolTimer.Start( vkCommandBuffer );
         ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
 
         VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
@@ -176,7 +194,7 @@ VkResult Mapping::Dispatch(VkQueue vkQueue, vkmr::Pipeline& pipeline) {
         host2ShaderDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         host2ShaderDep.memoryBarrierCount = 1;
         host2ShaderDep.pMemoryBarriers = &host2ShaderMemB;
-        g_VkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
+        g_pVkCmdPipelineBarrier2KHR( vkCommandBuffer, &host2ShaderDep );
 
         // Split into as many dispatches as are needed
         const auto bound = static_cast<uint>( m_batch.Count( ) );
@@ -200,6 +218,7 @@ VkResult Mapping::Dispatch(VkQueue vkQueue, vkmr::Pipeline& pipeline) {
             // Advance
             remaining -= x;
         }
+        m_queryPoolTimer.Finish( vkCommandBuffer );
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }   
     VkCommandBuffer commandBuffers[] = { vkCommandBuffer };
@@ -226,6 +245,7 @@ void Mapping::Release(void) {
     }
     m_descriptorSet = DescriptorSet( );
     m_commandBuffer = CommandBuffer( );
+    m_queryPoolTimer = QueryPoolTimer( );
     Reset( );
 }
 
@@ -236,7 +256,8 @@ public:
         m_capacity( capacity ),
         m_descriptorPool( device.CreateDescriptorPool( capacity, 3 * capacity ) ), // 1 set per potential concurrent mapping op
         m_commandPool( device.CreateCommandPool( ) ),
-        m_pipeline( ::std::move( pipeline ) ) {
+        m_pipeline( ::std::move( pipeline ) ),
+        m_queryPoolTimers( device ) {
 
         VkPhysicalDeviceProperties vkPhysicalDeviceProperties = {};
         ::vkGetPhysicalDeviceProperties( device.PhysicalDevice( ), &vkPhysicalDeviceProperties );
@@ -249,11 +270,12 @@ public:
         m_descriptorPool = DescriptorPool( );
         m_commandPool = CommandPool( );
         m_pipeline = Pipeline( );
+        m_queryPoolTimers = QueryPoolTimers( );
     }
 
     VkResult Map(Batch&&, Slice<VkSha256Result>&&, VkQueue);
 
-    void Update(void);
+    ::std::vector<slice_type> Update(void);
 
     void WaitFor(void);
 
@@ -264,6 +286,7 @@ private:
     DescriptorPool m_descriptorPool;
     CommandPool m_commandPool;
     vkmr::Pipeline m_pipeline;
+    QueryPoolTimers m_queryPoolTimers;
 
     ::std::vector<Mapping> m_container;
 };
@@ -282,7 +305,8 @@ VkResult MappingsImpl::Map(Batch&& batch, Slice<VkSha256Result>&& slice, VkQueue
             m_commandPool.AllocateCommandBuffer( ),
             ::std::move( batch ),
             ::std::move( slice ),
-            m_maxComputeWorkGroupCount
+            m_maxComputeWorkGroupCount,
+            m_queryPoolTimers.New( )
         )
     );
     if (ok){
@@ -293,19 +317,35 @@ VkResult MappingsImpl::Map(Batch&& batch, Slice<VkSha256Result>&& slice, VkQueue
     return VK_ERROR_OUT_OF_POOL_MEMORY;
 }
 
-void MappingsImpl::Update(void) {
+::std::vector<Mappings::slice_type> MappingsImpl::Update(void) {
 
-    for (auto it = m_container.cbegin( ); it != m_container.cend( ); ) {
+    ::std::vector<Mappings::slice_type> slices;
+    for (auto it = m_container.begin( ); it != m_container.end( ); ) {
         // Get the current status
         auto status = ::vkGetFenceStatus( m_vkDevice, static_cast<VkFence>( *it ) );
         if (status == VK_SUCCESS){
-            // Retire the mapping by removing from hte
+            // Retire the mapping by removing from the vector
+            auto mapping = ::std::move( *it );
             it = m_container.erase( it );
+
+            // Accumulate the slice
+            slices.push_back( ::std::move( mapping.MoveSlice( ) ) );
+            const auto& batch = mapping.Subject( );
+
+            // Output
+            const auto& sub = slices.back( );
+            std::cout << "Mapping for slice #" << sub.Number( ) << " (" << sub.Reserved( ) << " item(s); " << batch.Size( ) << " byte(s)) finished";
+            auto elapsed = mapping.Timer( ).ElapsedMillis( );
+            if (elapsed != 0){
+                ::std::cout << " in " << elapsed << "ms";
+            }
+            ::std::cout << "." << ::std::endl;
         }else{
             // Check again later; for now, just advance
             ++it;
         }
     }
+    return slices;
 }
 
 void MappingsImpl::WaitFor(void) {
@@ -321,9 +361,7 @@ void MappingsImpl::WaitFor(void) {
 
     // Wait on them all
     ::vkWaitForFences( m_vkDevice, fences.size( ), fences.data( ), VK_TRUE, UINT64_MAX );
-
-    // Retire them all
-    m_container.clear( );
+    this->Update( );
 }
 
 ::std::unique_ptr<Mappings> Mappings::New(ComputeDevice& device, uint32_t capacity) {

@@ -26,7 +26,7 @@ int main(int argc, const char* argv[]) {
 
     // Fail safe
     if (argc < 3){
-        std::cerr << "Usage: rndm [seed] [max total size] [max element size]" << std::endl;
+        std::cerr << "Usage: rndm [seed] [number of strings] [max string length]" << std::endl;
         return 1;
     }
 
@@ -39,15 +39,9 @@ int main(int argc, const char* argv[]) {
     // Start generating/writing until we've written just as much as asked for
     size_t count = 0U;
     long sum = 0U;
-    for ( ; sum < bound; ++count ){
+    for ( ; count < bound; ++count ){
         // Get a non-zero random value less than the set maximum
-        const auto r = 1 + (std::rand( ) % (max - 1));
-
-        // Use to get the length of the next string, capped to the remaining unfilled total
-        const auto len = std::min( bound - sum, r );
-        if (len == 0){
-            break;
-        }
+        const auto len = 1 + (std::rand( ) % (max - 1));
         
         // Generate, write out the data itself
         const size_t nchars = 1;

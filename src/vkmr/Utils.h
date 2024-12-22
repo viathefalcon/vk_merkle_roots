@@ -33,7 +33,7 @@ bool is_pow2(T arg) {
 template <typename T>
 T largest_pow2_le(T limit) {
 
-    T result = 1U;
+    T result = 1;
     while (true) {
         const T nxt = (result << 1);
         if (nxt > limit){
@@ -41,6 +41,29 @@ T largest_pow2_le(T limit) {
         }
         result = nxt;
     }
+    return result;
+}
+
+// Returns the lowest common multiple of the given values
+template <typename T>
+T lowest_common_multiple(T lhs, T rhs) {
+    
+    // Figure out the smaller of the args
+    T smaller = lhs, larger = rhs;
+    if (smaller > larger){
+        smaller = rhs;
+        larger = lhs;
+    }
+
+    // Now, loop until we have a product of the smaller which
+    // can be divided by the larger without a remainder
+    T result, multiplicand = 0;
+    do {
+        result = smaller * (++multiplicand);
+        if ((result % larger) == 0){
+            break;
+        }
+    } while (multiplicand < larger);
     return result;
 }
 

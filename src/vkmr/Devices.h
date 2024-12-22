@@ -104,7 +104,7 @@ private:
 typedef struct {
     uint32_t heapIndex;
     uint32_t memoryTypeIndex;
-    VkDeviceSize vkMemoryBudget;
+    VkDeviceSize vkMemoryBudget, vkMemorySize;
     VkMemoryPropertyFlags vkMemoryPropertyFlags;
 } MemoryTypeBudget;
 
@@ -206,8 +206,8 @@ public:
     // Creates a new command pool
     CommandPool CreateCommandPool(void) const;
 
-    // Returns a handle to the queue with the given index
-    VkQueue Queue(uint32_t) const;
+    // Returns a handle to a queue
+    VkQueue Queue(void);
 
     // Returns the memory requirement of storage buffers
     // created with the device
@@ -234,7 +234,7 @@ private:
     void Release(void);
 
     VkPhysicalDevice m_vkPhysicalDevice;
-    uint32_t m_queueFamily, m_queueCount;
+    uint32_t m_queueFamily, m_queueCount, m_queueNext;
 
     VkResult m_vkResult;
     VkDevice m_vkDevice;

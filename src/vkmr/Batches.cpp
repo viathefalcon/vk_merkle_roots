@@ -46,59 +46,82 @@ Batch& Batch::operator=(Batch&& batch) {
     return (*this);
 }
 
-bool Batch::Push(const char* str, size_t len) {
+Batch::size_type Batch::Size(void) const {
+
+    size_type size = 0;
+    for (size_type s = 0; s < m_count; s++){
+        VkSha256Metadata metadata;
+        ::std::memcpy(
+            &metadata,
+            static_cast<unsigned char*>( m_metadata.pData ) + (s * sizeof( VkSha256Metadata )),
+            sizeof( VkSha256Metadata )
+        );
+        size += metadata.size;
+    }
+    return size;
+}
+
+bool Batch::Push(const ::std::vector<::std::string>& strings) {
 
     // Look for an early out
     if (!(*this)){
         return false;
     }
-    if (!str || (len == 0)){
-        return true; // Silently skip
+    if (strings.empty( )){
+        return true;
     }
-    using ::std::memcpy;
 
     // Is there space for the metadata
-    const auto new_metadata_size = (sizeof( VkSha256Metadata ) * (m_count + 1));
+    const auto new_metadata_size = (sizeof( VkSha256Metadata ) * (m_count + strings.size( )));
     if (new_metadata_size > m_metadata.vkSize){
         // Nope
         return false;
     }
 
-    // Is there space for the string itself
+    // Is there space for the strings themselves
     auto back = this->Back( );
-    const auto wc = WordCount( len );
+    uint32_t wc = 0;
+    ::std::for_each( strings.cbegin( ), strings.cend( ), [&wc](const ::std::string& str) {
+        wc += WordCount( str.size( ) );
+    } );
+    if (wc == 0){
+        // Just pretend..
+        return true;
+    }
     const auto new_data_size = sizeof( uint ) * (back.start + WordCount( back.size ) + wc);
     if (new_data_size > m_data.vkSize){
         // Nope
         return false;
     }
 
-    // Append the metadata
-    back.start = (back.start + WordCount( back.size ));
-    back.size = static_cast<uint>( len );
-    memcpy(
-        reinterpret_cast<uint8_t*>( m_metadata.pData ) + (sizeof( VkSha256Metadata ) * m_count),
-        &back,
-        sizeof( VkSha256Metadata )
-    );
+    // If we get here, then we're good to go
+    ::std::for_each( strings.cbegin( ), strings.cend( ), [&](const ::std::string& str) {
+        const auto len = str.size( );
 
-    // Append the string
-    memcpy(
-        reinterpret_cast<uint8_t*>( m_data.pData ) + (back.start * sizeof( uint )),
-        str,
-        sizeof( char ) * len
-    );
+        // Append the metadata
+        back.start = (back.start + WordCount( back.size ));
+        back.size = static_cast<uint>( len );
+        memcpy(
+            reinterpret_cast<uint8_t*>( m_metadata.pData ) + (sizeof( VkSha256Metadata ) * m_count),
+            &back,
+            sizeof( VkSha256Metadata )
+        );
 
-    // Update our state and give the caller the happy news
-    m_count += 1;
+        // Append the string
+        memcpy(
+            reinterpret_cast<uint8_t*>( m_data.pData ) + (back.start * sizeof( uint )),
+            str.c_str( ),
+            sizeof( char ) * len
+        );
+
+        // Update our state and give the caller the happy news
+        m_count += 1;
+    } );
     return true;
 }
 
-void Batch::Pop(void) {
-
-    if (m_count > 0){
-        m_count -= 1U;
-    }
+void Batch::Pop(size_t count) {
+    m_count -= ::std::min( m_count, count );
 }
 
 Batch::VkBufferDescriptors Batch::BufferDescriptors(void) const {
@@ -291,10 +314,10 @@ uint32_t Batches::MaxBatchCount(const ComputeDevice& device) const {
         // Look for the heap
         const auto found = heaped.find( deviceMemoryBudget.heapIndex );
         if (found == heaped.end( )){
-            heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemoryBudget } );
+            heaped.insert( { deviceMemoryBudget.heapIndex, deviceMemoryBudget.vkMemorySize } );
             continue;
         }
-        found->second = ::std::max( found->second, deviceMemoryBudget.vkMemoryBudget );
+        found->second = ::std::max( found->second, deviceMemoryBudget.vkMemorySize );
     }
 
     // Now iterate the heaps and sum up
@@ -307,7 +330,7 @@ uint32_t Batches::MaxBatchCount(const ComputeDevice& device) const {
     return result;
 }
 
-Batch Batches::NewBatch(ComputeDevice& device) {
+Batch Batches::New(ComputeDevice& device) {
 
     // Look for an early out
     if (!(*this)){

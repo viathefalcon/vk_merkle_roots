@@ -7,8 +7,10 @@
 // Includes
 //
 
+// Local Project Headers
+#include "ISha256D.h"
+
 // C++ Standard Library Headers
-#include <string>
 #include <vector>
 
 namespace vkmr {
@@ -25,25 +27,23 @@ namespace vkmr {
 // Classes
 //
 
-class CpuSha256D {
+class CpuSha256D : public ISha256D {
 public:
-    typedef ::std::string arg_type;
-    typedef ::std::string out_type;
+    CpuSha256D(): ISha256D("CPU") { }
 
-    out_type Root(void) const;
+    ISha256D::out_type Root(void);
 
-    bool Add(const arg_type&& arg) {
-        m_args.push_back( arg );
-        return true;
-    }
+    bool Add(const ISha256D::arg_type& arg);
 
     bool Reset(void) {
-        m_args.clear( );
+        m_leaves.clear( );
         return true;
     }
 
-private:
-    ::std::vector<arg_type> m_args;
+protected:
+    typedef ::std::vector<uint32_t> node_type;
+
+    ::std::vector<node_type> m_leaves;
 };
 
 } // namespace vkmr

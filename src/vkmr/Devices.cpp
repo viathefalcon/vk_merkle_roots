@@ -20,7 +20,7 @@
 //
 
 // Vulkan Extension Function Pointers
-extern PFN_vkCmdPipelineBarrier2KHR g_VkCmdPipelineBarrier2KHR;
+extern PFN_vkCmdPipelineBarrier2KHR g_pVkCmdPipelineBarrier2KHR;
 extern PFN_vkGetPhysicalDeviceProperties2KHR g_pVkGetPhysicalDeviceProperties2KHR;
 extern PFN_vkGetPhysicalDeviceMemoryProperties2KHR g_pVkGetPhysicalDeviceMemoryProperties2KHR;
 
@@ -409,6 +409,7 @@ ComputeDevice::ComputeDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t queueFa
     m_vkPhysicalDevice( vkPhysicalDevice ),
     m_queueFamily( queueFamily ),
     m_queueCount( queueCount ),
+    m_queueNext( 0U ),
     m_vkResult( VK_RESULT_MAX_ENUM ),
     m_vkDevice( VK_NULL_HANDLE ) {
 
@@ -489,6 +490,7 @@ ComputeDevice::ComputeDevice(ComputeDevice&& device):
     m_vkPhysicalDevice( device.m_vkPhysicalDevice ),
     m_queueFamily( device.m_queueFamily ),
     m_queueCount( device.m_queueCount ),
+    m_queueNext( device.m_queueNext ),
     m_vkResult( device.m_vkResult ),
     m_vkDevice( device.m_vkDevice) {
 
@@ -503,6 +505,7 @@ ComputeDevice& ComputeDevice::operator=(ComputeDevice&& device) {
         m_vkPhysicalDevice = device.m_vkPhysicalDevice;
         m_queueFamily = device.m_queueFamily;
         m_queueCount = device.m_queueCount;
+        m_queueNext = device.m_queueNext;
         m_vkResult = device.m_vkResult;
         m_vkDevice = device.m_vkDevice;
 
@@ -519,12 +522,17 @@ CommandPool ComputeDevice::CreateCommandPool(void) const {
     return CommandPool( m_vkDevice, m_queueFamily );
 }
 
-VkQueue ComputeDevice::Queue(uint32_t queueIndex) const {
+VkQueue ComputeDevice::Queue(void) {
 
     VkQueue vkQueue = VK_NULL_HANDLE;
-    ::vkGetDeviceQueue( m_vkDevice, m_queueFamily, queueIndex, &vkQueue );
+    ::vkGetDeviceQueue( m_vkDevice, m_queueFamily, m_queueNext, &vkQueue );
     if (vkQueue == VK_NULL_HANDLE){
         ::std::cerr << "Failed to retrieve handle to device queue!" << ::std::endl;
+    }else{
+        m_queueNext += 1U;
+        if (m_queueNext >= m_queueCount){
+            m_queueNext = 0U;
+        }
     }
     return vkQueue;
 }
@@ -606,7 +614,13 @@ ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
         }
 
         // Map the index to the budget and accumulate
-        MemoryTypeBudget memoryTypeBudget = { vkMemoryType->heapIndex, index, budget, vkMemoryType->propertyFlags };
+        MemoryTypeBudget memoryTypeBudget = {
+            vkMemoryType->heapIndex,
+            index,
+            budget,
+            pvkMemoryHeap->size,
+            vkMemoryType->propertyFlags
+        };
         memoryTypeBudgets.push_back( memoryTypeBudget );
     }
 
@@ -626,7 +640,7 @@ VkDeviceMemory ComputeDevice::Allocate(const MemoryTypeBudget& deviceMemoryBudge
     VkDeviceMemory vkDeviceMemory = VK_NULL_HANDLE;
     VkResult vkResult = ::vkAllocateMemory( m_vkDevice, &vkDeviceMemoryAllocateInfo, VK_NULL_HANDLE, &vkDeviceMemory );
     if (vkResult == VK_SUCCESS){
-        ::std::cout << "Allocated " << int64_t(vkSize) << " bytes of memory type " << vkDeviceMemoryAllocateInfo.memoryTypeIndex << ::std::endl;
+        //::std::cout << "Allocated " << int64_t(vkSize) << " bytes of memory type " << vkDeviceMemoryAllocateInfo.memoryTypeIndex << ::std::endl;
 
         // TODO, maybe: keep track of allocations? But, would that ever be useful?
         return vkDeviceMemory;
@@ -644,7 +658,7 @@ void ComputeDevice::Free(VkDeviceMemory vkDeviceMemory) const {
 void ComputeDevice::Reset() {
 
     m_vkPhysicalDevice = VK_NULL_HANDLE;
-    m_queueCount = 0;
+    m_queueCount = m_queueNext = 0U;
     m_queueFamily = uint32_t(-1);
     m_vkResult = VK_RESULT_MAX_ENUM;
     m_vkDevice = VK_NULL_HANDLE;
