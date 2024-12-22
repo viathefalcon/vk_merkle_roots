@@ -101,7 +101,7 @@ Overall, the program is not terribly quick, but I was curious to see how much ti
 
 | Platform | Mapping | Reduction (by Subgroups) | Effective Hashrate |
 | ------------- | ------------- | ------------- | ------------- |
-| Steam Deck (LCD)  | ~252MB in ~190ms = ~1.295GB/s  | 256MB in ~800ms = 320MB/s | ~20.9 MH/s |
+| Steam Deck (LCD)  | ~252MB in ~190ms = ~1.295GB/s  | 256MB in ~800ms = 320MB/s | ~20.9MH/s |
 | Intel Iris Xe Graphics (12th Gen, integrated) | ~252MB in ~80ms = ~3.039GB/s  | 256MB in 300ms = ~853.33MB/s | ~55.9MH/s |
 | nVidia RTX 4070 Super (via Thunderbolt) | ~252MB in ~265ms = ~951MB/s  | 256MB in _<16ms_ = ~16GB/s | ~1.118 GH/s |
 
