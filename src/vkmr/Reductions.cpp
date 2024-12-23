@@ -33,6 +33,13 @@ using ::std::vector;
 // Types
 //
 
+struct alignas(uint) BasicPushConstants {
+    uint offset;
+    uint pass;
+    uint delta;
+    uint bound;
+};
+
 struct alignas(uint) BySubgroupPushConstants {
     uint offset;
     uint pairs;
@@ -74,14 +81,21 @@ public:
 
     VkSha256Result Read(void);
     VkResult Apply(Reductions::slice_type&&, ComputeDevice&, const vkmr::Pipeline&);
-    virtual double Elapsed(void);
+
+    virtual double Elapsed(void) {
+        return m_queryPoolTimer.ElapsedMillis( );
+    }
 
 protected:
     Reduction();
-    Reduction(VkResult, VkDevice);
+    Reduction(VkResult, VkDevice, QueryPoolTimer&&);
 
     virtual void Free(void);
     virtual CommandBuffer& GetCommandBuffer(ComputeDevice&, const vkmr::Pipeline&) = 0;
+
+    uint HalfEven(uint u) {
+        return (((u % 2 == 0) ? u : (u+1)) >> 1);
+    }
 
     VkResult m_vkResult;
     VkDevice m_vkDevice;
@@ -90,17 +104,19 @@ protected:
     VkBuffer m_vkBufferHost;
     VkDeviceMemory m_vkHostMemory;
 
+    QueryPoolTimer m_queryPoolTimer;
     Reductions::slice_type m_slice;
 };
 
-Reduction::Reduction(VkResult vkResult, VkDevice vkDevice):
+Reduction::Reduction(VkResult vkResult, VkDevice vkDevice, QueryPoolTimer&& queryPoolTimer):
     m_vkResult( vkResult ),
     m_vkDevice( vkDevice ),
     m_vkFence( VK_NULL_HANDLE ),
     m_vkBufferHost( VK_NULL_HANDLE ),
-    m_vkHostMemory( VK_NULL_HANDLE ) { }
+    m_vkHostMemory( VK_NULL_HANDLE ),
+    m_queryPoolTimer( ::std::move( queryPoolTimer ) ) { }
 
-Reduction::Reduction(): Reduction( VK_RESULT_MAX_ENUM, VK_NULL_HANDLE ) { }
+Reduction::Reduction(): Reduction( VK_RESULT_MAX_ENUM, VK_NULL_HANDLE, QueryPoolTimer( ) ) { }
 
 Reduction::~Reduction() {
     this->Free( );
@@ -199,10 +215,6 @@ VkResult Reduction::Apply(Reductions::slice_type&& slice, ComputeDevice& device,
     return m_vkResult; 
 }
 
-double Reduction::Elapsed(void) {
-    return 0;
-}
-
 void Reduction::Free(void) {
 
     const VkAllocationCallbacks *pAllocator = VK_NULL_HANDLE;
@@ -222,7 +234,7 @@ void Reduction::Free(void) {
 
 class BasicReduction : public Reduction {
 public:
-    BasicReduction(VkDevice, DescriptorSet&&, CommandBuffer&&);
+    BasicReduction(VkDevice, DescriptorSet&&, CommandBuffer&&, QueryPoolTimer&&);
     virtual ~BasicReduction(void) { }
 
     virtual CommandBuffer& GetCommandBuffer(ComputeDevice&, const vkmr::Pipeline&);
@@ -235,8 +247,8 @@ private:
     CommandBuffer m_commandBuffer;
 };
 
-BasicReduction::BasicReduction(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer):
-    Reduction( VK_RESULT_MAX_ENUM, vkDevice ),
+BasicReduction::BasicReduction(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, QueryPoolTimer&& queryPoolTimer):
+    Reduction( VK_RESULT_MAX_ENUM, vkDevice, ::std::move( queryPoolTimer ) ),
     m_vkSize( 0U ),
     m_count( 0U ),
     m_descriptorSet( ::std::move( descriptorSet ) ),
@@ -267,12 +279,19 @@ CommandBuffer& BasicReduction::GetCommandBuffer(ComputeDevice& device, const vkm
     vkCommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     m_vkResult = ::vkBeginCommandBuffer( vkCommandBuffer, &vkCommandBufferBeginInfo );
     if (m_vkResult == VK_SUCCESS){
+        VkPhysicalDeviceProperties vkPhysicalDeviceProperties = {};
+        ::vkGetPhysicalDeviceProperties( device.PhysicalDevice( ), &vkPhysicalDeviceProperties );
+
+        // Capture the timstamp
+        m_queryPoolTimer.Start( vkCommandBuffer );
+
         ::vkCmdBindPipeline( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline );
         VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
         ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
         // Loop until we've reduced the number of elements to 1
-        for (uint pass = 0U, count = m_count; count > 1U; ){
+        uint applicable = m_slice.Number( ) > 1 ? m_slice.Capacity( ) : m_slice.Count( );
+        for (uint pass = 0U, count = m_count; applicable > 1U; applicable = HalfEven( applicable )){
             const uint delta = (1 << pass);
 
             // Shader only operates on pairs, so the group count
@@ -336,26 +355,33 @@ CommandBuffer& BasicReduction::GetCommandBuffer(ComputeDevice& device, const vkm
                 g_pVkCmdPipelineBarrier2KHR( vkCommandBuffer, &vkDependencyInfo );
             }
 
-            // Push the constants
-            struct {
-                uint pass, delta, bound;
-            } pc;
+            // Split into as many dispatches as are needed
+            BasicPushConstants pc = {};
             pc.pass = (++pass);
             pc.delta = delta;
             pc.bound = m_count;
-            ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
-
-            // Actually dispatch the shader invocations
             const auto pairs = (count >> 1);
             const auto& workgroupSize = pipeline.GetWorkGroupSize( );
-            const auto x = workgroupSize.GetGroupCountX( pairs );
-            ::std::cout << "Dispatching " << x << " workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
-            ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
+            const auto workgroups = workgroupSize.GetGroupCountX( pairs );
+            for (auto remaining = workgroups; remaining > 0U; ){
+                const auto x = ::std::min(
+                    remaining,
+                    vkPhysicalDeviceProperties.limits.maxComputeWorkGroupCount[0]
+                );
 
+                // Push the constants
+                pc.offset = workgroupSize.x * (workgroups - remaining);
+                ::vkCmdPushConstants( vkCommandBuffer, pipeline.Layout( ), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( pc ), &pc );
+
+                // Actually dispatch the shader invocations
+                ::std::cout << "Dispatching " << x << " workgroup(s) of size " << workgroupSize.x << " for " << pairs << " pair(s)" << ::std::endl;
+                ::vkCmdDispatch( vkCommandBuffer, x, 1, 1 );
+
+                remaining -= x;
+            }
             count = pairs;
         }
-    }
-    if (m_vkResult == VK_SUCCESS){
+
         // Insert a barrier such that the writes from the shader complete
         // before we try and copy back to host-mappable memory
         VkMemoryBarrier2KHR vkMemoryBarrier = {};
@@ -374,6 +400,9 @@ CommandBuffer& BasicReduction::GetCommandBuffer(ComputeDevice& device, const vkm
         VkBufferCopy vkBufferCopy = {};
         vkBufferCopy.size = sizeof( VkSha256Result );
         ::vkCmdCopyBuffer( vkCommandBuffer, m_slice.Buffer( ), m_vkBufferHost, 1, &vkBufferCopy );
+
+        // Wrap it all up
+        m_queryPoolTimer.Finish( vkCommandBuffer );
         m_vkResult = ::vkEndCommandBuffer( vkCommandBuffer );
     }
     return m_commandBuffer;
@@ -386,26 +415,20 @@ public:
 
     virtual CommandBuffer& GetCommandBuffer(ComputeDevice&, const vkmr::Pipeline&);
 
-    double Elapsed(void) {
-        return m_queryPoolTimer.ElapsedMillis( );
-    }
-
 private:
     VkDeviceSize m_vkSize;
     uint m_count;
 
     DescriptorSet m_descriptorSet;
     CommandBuffer m_commandBuffer;
-    QueryPoolTimer m_queryPoolTimer;
 };
 
 ReductionBySubgroup::ReductionBySubgroup(VkDevice vkDevice, DescriptorSet&& descriptorSet, CommandBuffer&& commandBuffer, QueryPoolTimer&& queryPoolTimer):
-    Reduction( VK_RESULT_MAX_ENUM, vkDevice ),
+    Reduction( VK_RESULT_MAX_ENUM, vkDevice, ::std::move( queryPoolTimer ) ),
     m_vkSize( 0U ),
     m_count( 0U ),
     m_descriptorSet( ::std::move( descriptorSet ) ),
-    m_commandBuffer( ::std::move( commandBuffer ) ),
-    m_queryPoolTimer( ::std::move( queryPoolTimer ) ) { }
+    m_commandBuffer( ::std::move( commandBuffer ) ) { }
 
 CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, const vkmr::Pipeline& pipeline) {
 
@@ -443,20 +466,15 @@ CommandBuffer& ReductionBySubgroup::GetCommandBuffer(ComputeDevice& device, cons
         VkDescriptorSet descriptorSets[] = { *m_descriptorSet };
         ::vkCmdBindDescriptorSets( vkCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Layout( ), 0, 1, descriptorSets, 0, VK_NULL_HANDLE );
 
-        // Setup
-        auto halveven = [](uint u) -> uint {
-            return (((u % 2 == 0) ? u : (u+1)) >> 1);
-        };
-        const auto& workgroupSize = pipeline.GetWorkGroupSize( );
-
         // Loop until we will have reduced to 1 element
+        const auto& workgroupSize = pipeline.GetWorkGroupSize( );
         uint applicable = m_slice.Number( ) > 1 ? m_slice.Capacity( ) : m_slice.Count( );
         for (uint delta = 1U, count = m_count; applicable > 1U; ){
-            applicable = halveven( applicable );
+            applicable = HalfEven( applicable );
 
             // Get the actual number of work groups needed for the current pass
             const auto elements = count;
-            const auto pairs = halveven( count );
+            const auto pairs = HalfEven( count );
             count = workgroupSize.GetGroupCountX( pairs );
 
             // Split into as many dispatches as are needed
@@ -553,7 +571,8 @@ public:
             product = make_shared<BasicReduction>(
                 vkDevice,
                 ::std::move( descriptorSet ),
-                ::std::move( commandBuffer )
+                ::std::move( commandBuffer ),
+                m_queryPoolTimers.New( )
             );
         }
         return product;
@@ -741,7 +760,6 @@ ISha256D::out_type ReductionsImpl::WaitFor(void) {
     // If suitably-sized subgroups are supported,
     // then make the workgroup size the same as the subgroup size
     WorkgroupSize workgroupSize = {};
-    WorkgroupSize *pWorkgroupSize = nullptr;
     if (subgroupsSupported){
         ::std::cout << "Subgroup feature flags = 0x" << std::hex << subgroupFeatureFlags << ::std::endl;
         ::std::cout << "Subgroups, with relative shuffle support, of size " << std::dec << subgroupSize << " are supported." << ::std::endl;
@@ -750,7 +768,11 @@ ISha256D::out_type ReductionsImpl::WaitFor(void) {
         workgroupSize.y = 1U;
         workgroupSize.z = 1U;
         workgroupSize.bySubgroup = true;
-        pWorkgroupSize = &workgroupSize;
+    }else{
+        workgroupSize.x = 64; // A sensible multiple of common subgroup sizes across Intel, nVidia & AMD
+        workgroupSize.y = 1U;
+        workgroupSize.z = 1U;
+        workgroupSize.bySubgroup = false;
     }
 
     // Load the shader code, wrap it in a module, etc
@@ -791,7 +813,7 @@ ISha256D::out_type ReductionsImpl::WaitFor(void) {
         vkPushConstantRange.offset = 0;
         vkPushConstantRange.size = subgroupsSupported
             ? sizeof( BySubgroupPushConstants )
-            : (sizeof( uint ) * 3);
+            : sizeof( BasicPushConstants );
         reductions.reset( new ReductionsImpl(
             device,
             vkmr::Pipeline(
@@ -799,7 +821,7 @@ ISha256D::out_type ReductionsImpl::WaitFor(void) {
                 vkDescriptorSetLayout,
                 vkmr::Pipeline::NewSimpleLayout( vkDevice, vkDescriptorSetLayout, &vkPushConstantRange ),
                 ::std::move( shaderModule ),
-                pWorkgroupSize
+                &workgroupSize
             ),
             ::std::move( descriptorPool ),
             subgroupsSupported
