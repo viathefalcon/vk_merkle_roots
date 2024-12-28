@@ -1,7 +1,7 @@
 # Vulkan Merkle Roots
 
 ## Summary
-A program to demonstrate the calculation/resolution of the roots of [Merkle/hash trees](https://en.wikipedia.org/wiki/Merkle_tree) of arbitrary inputs on GPUs via the [Vulkan API](https://en.wikipedia.org/wiki/Vulkan).
+A program to demonstrate the calculation of the roots of [Merkle/hash trees](https://en.wikipedia.org/wiki/Merkle_tree) of arbitrary inputs on GPUs via the [Vulkan API](https://en.wikipedia.org/wiki/Vulkan).
 
 ## Components
 ### `vkmr`
@@ -52,7 +52,7 @@ Pulling a proof-of-concept together, using OpenCL, really wasn't too difficult, 
 * Not have any dependencies beyond Vulkan and the C++ Standard Library.
 
 ### Non-Goals
-* Performance: where there is a choice between doing something on the GPU and doing it more performantly on the CPU, do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
+* Performance: i.e., where there is a choice between doing something on the GPU and doing it more performantly on the CPU, prefer to do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
 
 ### Choices
 
