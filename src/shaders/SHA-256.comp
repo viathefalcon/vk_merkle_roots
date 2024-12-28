@@ -25,9 +25,9 @@
 // Layouts
 //
 
-#ifdef _SHA_256_N_
 layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
+#ifdef _SHA_256_N_
 layout(push_constant, std430) uniform pc {
     uint offset;
     uint bound;
@@ -54,12 +54,6 @@ layout(std430, set = 0, binding = 2) writeonly buffer result_layout
 #extension GL_KHR_shader_subgroup_basic : enable
 #extension GL_KHR_shader_subgroup_shuffle_relative: enable
 
-layout(constant_id = 0) const uint localSizeX = 64;
-layout(constant_id = 1) const uint localSizeY = 1;
-layout(constant_id = 2) const uint localSizeZ = 1;
-
-layout (local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
-
 layout(push_constant, std430) uniform pc {
     uint offset;
     uint pairs;
@@ -69,6 +63,7 @@ layout(push_constant, std430) uniform pc {
 };
 #else
 layout(push_constant, std430) uniform pc {
+    uint offset;
     uint pass;
     uint delta;
     uint bound;
@@ -397,7 +392,7 @@ void main() {
 #else
 void main() {
     // Bounds check
-    const uint idx = gl_GlobalInvocationID.x << pass;
+    const uint idx = (gl_GlobalInvocationID.x + offset) << pass;
     if (idx > bound){
         return;
     }

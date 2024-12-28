@@ -1,7 +1,7 @@
 # Vulkan Merkle Roots
 
 ## Summary
-A program to demonstrate the calculation/resolution of the roots of [Merkle/hash trees](https://en.wikipedia.org/wiki/Merkle_tree) of arbitrary inputs on GPUs via the [Vulkan API](https://en.wikipedia.org/wiki/Vulkan).
+A program to demonstrate the calculation of the roots of [Merkle/hash trees](https://en.wikipedia.org/wiki/Merkle_tree) of arbitrary inputs on GPUs via the [Vulkan API](https://en.wikipedia.org/wiki/Vulkan).
 
 ## Components
 ### `vkmr`
@@ -52,7 +52,7 @@ Pulling a proof-of-concept together, using OpenCL, really wasn't too difficult, 
 * Not have any dependencies beyond Vulkan and the C++ Standard Library.
 
 ### Non-Goals
-* Performance: where there is a choice between doing something on the GPU and doing it more performantly on the CPU, do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
+* Performance: i.e., where there is a choice between doing something on the GPU and doing it more performantly on the CPU, prefer to do it on the GPU (the aim being, recall, that the Merkle root calculation runs entirely asynchronously with respect to whatever's happening on the CPU).
 
 ### Choices
 
@@ -99,11 +99,11 @@ The Merkle root of the whole dataset can then be calculated as the Merkle root o
 
 Overall, the program is not terribly quick, but I was curious to see how much time was being spent processing on the GPU, and: 
 
-| Platform | Mapping | Reduction (by Subgroups) | Effective Hashrate |
-| ------------- | ------------- | ------------- | ------------- |
-| Steam Deck (LCD)  | ~252MB in ~190ms = ~1.295GB/s  | 256MB in ~800ms = 320MB/s | ~20.9MH/s |
-| Intel Iris Xe Graphics (12th Gen, integrated) | ~252MB in ~80ms = ~3.039GB/s  | 256MB in 300ms = ~853.33MB/s | ~55.9MH/s |
-| nVidia RTX 4070 Super (via Thunderbolt) | ~252MB in ~265ms = ~951MB/s  | 256MB in _<16ms_ = ~16GB/s | ~1.118 GH/s |
+| Platform | Mapping | Reduction (w/Subgroups) | Effective Hashrate | Reduction (w/o Subgroups) | Effective Hashrate |
+| ------------- | ------------- | ------------- | ------------- | ------------- | ------------- |
+| Steam Deck (LCD)  | ~252MB in ~190ms = ~1.295GB/s  | 256MB in ~800ms = ~320MB/s | ~20.9MH/s | 256MB in ~250ms = ~1GB/s | ~67.1MH/s |
+| Intel Iris Xe Graphics (12th Gen, integrated) | ~252MB in ~80ms = ~3.039GB/s  | 256MB in 300ms = ~853.33MB/s | ~55.9MH/s | 256MB in ~110ms = ~2.3GB/s | ~152.5MH/s  |
+| nVidia RTX 4070 Super (via Thunderbolt) | ~252MB in ~265ms = ~951MB/s  | 256MB in _<16ms_ = ~16GB/s | ~1.082 GH/s | 256MB in _<9ms_ = ~16GB/s | ~1.864GH/s |
 
 I had only intended on including the numbers from the Steam Deck (since it is a relatively standardised platform) but the results of running the same tests - using the same dataset - against an RTX 4070 Super, even one connected as an eGPU, were .. eyebrow-raising.
 
