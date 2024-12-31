@@ -128,9 +128,9 @@ class Batches {
 public:
     Batches(Batches&&) noexcept;
     Batches(Batches&) = delete;
-    Batches(VkDeviceSize vkDataSize, VkDeviceSize vkMetadataSize):
+    Batches(VkDeviceSize vkDataSize):
         m_vkDataSize( vkDataSize ),
-        m_vkMetadataSize( vkMetadataSize ),
+        m_vkMetadataSize( (vkDataSize / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ),
         m_count( 0U ) { }
 
     Batches& operator=(Batches&&) noexcept;

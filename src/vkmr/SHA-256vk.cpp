@@ -20,7 +20,7 @@
 // Constants
 //
 
-static const VkDeviceSize MegaX = (256 * 1024 * 1024);
+static const uint32_t MegaX = (256 * 1024 * 1024);
 
 // Globals
 //
@@ -244,8 +244,8 @@ VkSha256D::Instance VkSha256D::Get(const ISha256D::name_type& name) {
 VkSha256D::Instance::Instance(const ::std::string& name, ComputeDevice&& device):
     IVkSha256DInstance( name ),
     m_device( ::std::move( device ) ),
-    m_slices( MegaX ),
-    m_batches( MegaX, (MegaX / sizeof( VkSha256Result ) ) * sizeof( VkSha256Metadata ) ) {
+    m_slices( m_device.MaxStorageBufferSize( MegaX ) ),
+    m_batches( m_device.MaxStorageBufferSize( MegaX )) {
 
     m_slices.New( m_device );
     m_mappings = Mappings::New( m_device, m_batches.MaxBatchCount( m_device ) );

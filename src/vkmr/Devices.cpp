@@ -574,6 +574,13 @@ VkDeviceSize ComputeDevice::MinStorageBufferOffset(void) const {
     return properties.limits.minStorageBufferOffsetAlignment;
 }
 
+VkDeviceSize ComputeDevice::MaxStorageBufferSize(uint32_t size) const {
+
+    VkPhysicalDeviceProperties properties;
+    ::vkGetPhysicalDeviceProperties( m_vkPhysicalDevice, &properties );
+    return ::std::min( size, properties.limits.maxStorageBufferRange );
+}
+
 ComputeDevice::MemoryTypeBudgets ComputeDevice::AvailableMemoryTypes(
     const VkMemoryRequirements& vkMemoryRequirements,
     VkMemoryPropertyFlags vkMemoryPropertyFlags) const {

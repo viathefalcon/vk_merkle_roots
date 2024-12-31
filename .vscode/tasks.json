@@ -110,12 +110,12 @@
                 "/EHsc",
                 "/nologo",
                 "/D_WIN32",
-                "/I${env:VulkanSDK}\\Include",
+                "/I${env:VULKAN_SDK}\\Include",
                 "${workspaceFolder}\\src\\vkmr\\*.cpp",
                 "vulkan-1.lib",
                 "/Fe${workspaceFolder}\\bin\\vkmr.exe",
                 "/link",
-                "/LIBPATH:${env:VulkanSDK}\\Lib"
+                "/LIBPATH:${env:VULKAN_SDK}\\Lib"
             ],
             "options": {
                 "cwd": "${workspaceFolder}\\bin"

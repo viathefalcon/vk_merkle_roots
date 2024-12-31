@@ -219,6 +219,10 @@ public:
     // Returns the minimum alignment of a storage buffer offset
     VkDeviceSize MinStorageBufferOffset(void) const;
 
+    // Returns the smaller of the given size and the effective maximum buffer size
+    // (we only deal in whole buffers, so the range becomes the limit)
+    VkDeviceSize MaxStorageBufferSize(uint32_t) const;
+
     // Returns the available memory types corresponding to the given requirements
     typedef ::std::vector<MemoryTypeBudget> MemoryTypeBudgets;
     MemoryTypeBudgets AvailableMemoryTypes(const VkMemoryRequirements&, VkMemoryPropertyFlags) const;
